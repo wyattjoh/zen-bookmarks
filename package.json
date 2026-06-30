@@ -1,0 +1,45 @@
+{
+  "name": "zen-bookmarks",
+  "version": "0.1.0",
+  "description": "Extract, parse, and rewrite the Zen browser sidebar (pinned tabs, folders, and workspaces) from zen-sessions.jsonlz4 into portable JSON, YAML, and Netscape HTML.",
+  "type": "module",
+  "bin": {
+    "zen-bookmarks-export": "./extract-bookmarks.ts",
+    "zen-bookmarks-update": "./update-bookmarks.ts"
+  },
+  "scripts": {
+    "export": "bun extract-bookmarks.ts",
+    "update": "bun update-bookmarks.ts"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "keywords": [
+    "zen",
+    "zen-browser",
+    "bookmarks",
+    "firefox",
+    "jsonlz4",
+    "mozlz4",
+    "session",
+    "sidebar",
+    "export"
+  ],
+  "author": "Wyatt Johnson",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wyattjoh/zen-bookmarks.git"
+  },
+  "homepage": "https://github.com/wyattjoh/zen-bookmarks#readme",
+  "bugs": {
+    "url": "https://github.com/wyattjoh/zen-bookmarks/issues"
+  },
+  "files": [
+    "extract-bookmarks.ts",
+    "update-bookmarks.ts",
+    "mozlz4.ts",
+    "README.md",
+    "LICENSE"
+  ]
+}

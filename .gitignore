@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Generated exports (contain personal bookmark data)
+bookmarks.json
+bookmarks.yaml
+bookmarks.html
+
+# Tool output and backups
+zen-sessions.preview.jsonlz4
+*.jsonlz4
+*.bak-*
+
+# Build artifacts
+dist/
+
+# macOS
+.DS_Store
