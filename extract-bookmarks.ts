@@ -11,9 +11,10 @@
  * Usage:
  *   bun extract-bookmarks.ts [--sessions <path>] [--out <dir>]
  */
-import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { writeFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readMozLz4Text } from "./mozlz4.ts";
 
 /**
  * A single exported bookmark (one pinned tab).
@@ -53,52 +54,6 @@ type Workspace = {
   folders: Folder[];
   bookmarks: Bookmark[];
 };
-
-/**
- * Decompress a Mozilla mozLz4 file (`mozLz40\0` magic + uint32 LE decompressed
- * size + raw LZ4 block) into its UTF-8 text contents.
- *
- * @param path - Absolute path to the `.jsonlz4` file
- * @returns The decompressed UTF-8 string
- */
-function decompressMozLz4(path: string): string {
-  const buf = readFileSync(path);
-  const magic = buf.subarray(0, 8).toString("latin1");
-  if (magic !== "mozLz40\0") {
-    throw new Error(`Not a mozLz4 file (bad magic): ${path}`);
-  }
-  const size = buf.readUInt32LE(8);
-  const src = buf.subarray(12);
-  const dst = new Uint8Array(size);
-  let s = 0;
-  let d = 0;
-  while (s < src.length) {
-    const token = src[s++];
-    let litLen = token >> 4;
-    if (litLen === 15) {
-      let b: number;
-      do {
-        b = src[s++];
-        litLen += b;
-      } while (b === 255);
-    }
-    for (let i = 0; i < litLen; i++) dst[d++] = src[s++];
-    if (s >= src.length) break;
-    const offset = src[s++] | (src[s++] << 8);
-    let matchLen = token & 0x0f;
-    if (matchLen === 15) {
-      let b: number;
-      do {
-        b = src[s++];
-        matchLen += b;
-      } while (b === 255);
-    }
-    matchLen += 4;
-    let m = d - offset;
-    for (let i = 0; i < matchLen; i++) dst[d++] = dst[m++];
-  }
-  return Buffer.from(dst.subarray(0, d)).toString("utf8");
-}
 
 /**
  * Locate the active Zen `zen-sessions.jsonlz4` by scanning all profiles and
@@ -336,7 +291,7 @@ function main(): void {
   const sessionsPath = getArg("--sessions") ?? findSessionsFile();
   const outDir = getArg("--out") ?? process.cwd();
 
-  const session = JSON.parse(decompressMozLz4(sessionsPath));
+  const session = JSON.parse(readMozLz4Text(sessionsPath));
   const workspaces = buildWorkspaces(session);
   const clean = workspaces.map((ws) => ({
     workspace: ws.name,
