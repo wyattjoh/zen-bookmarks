@@ -4,6 +4,7 @@
     "module": "Preserve",
     "moduleResolution": "bundler",
     "target": "ESNext",
+    "types": ["bun"],
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,

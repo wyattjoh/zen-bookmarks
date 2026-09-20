@@ -1,15 +1,19 @@
 {
   "name": "zen-bookmarks",
-  "version": "0.1.0",
-  "description": "Extract, parse, and rewrite the Zen browser sidebar (pinned tabs, folders, and workspaces) from zen-sessions.jsonlz4 into portable JSON, YAML, and Netscape HTML.",
+  "version": "0.2.0",
+  "description": "Read and manage Zen browser sidebar bookmarks, folders, and workspaces from a safe command-line interface.",
   "type": "module",
   "bin": {
+    "zen-bookmarks": "./zen-bookmarks.ts",
     "zen-bookmarks-export": "./extract-bookmarks.ts",
     "zen-bookmarks-update": "./update-bookmarks.ts"
   },
   "scripts": {
-    "export": "bun extract-bookmarks.ts",
-    "update": "bun update-bookmarks.ts"
+    "start": "bun zen-bookmarks.ts",
+    "export": "bun zen-bookmarks.ts export",
+    "update": "bun update-bookmarks.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
   },
   "engines": {
     "bun": ">=1.0.0"
@@ -36,10 +40,20 @@
     "url": "https://github.com/wyattjoh/zen-bookmarks/issues"
   },
   "files": [
+    "zen-bookmarks.ts",
+    "cli.ts",
+    "exporters.ts",
+    "session-store.ts",
+    "sidebar.ts",
+    "zen-process.ts",
     "extract-bookmarks.ts",
     "update-bookmarks.ts",
     "mozlz4.ts",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  }
 }
