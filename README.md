@@ -33,8 +33,15 @@ Profile discovery currently scans `~/Library/Application Support/zen/Profiles`. 
 ## Install
 
 ```bash
+bun add --global @wyattjoh/zen-bookmarks
+```
+
+To install from source instead:
+
+```bash
 git clone https://github.com/wyattjoh/zen-bookmarks.git
 cd zen-bookmarks
+bun install
 bun link
 ```
 
@@ -294,6 +301,8 @@ bun install
 bun test
 bun run typecheck
 ```
+
+See [RELEASING.md](RELEASING.md) for the automated release and npm publishing process.
 
 ## License
 

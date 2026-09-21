@@ -1,6 +1,7 @@
 {
-  "name": "zen-bookmarks",
+  "name": "@wyattjoh/zen-bookmarks",
   "version": "0.2.0",
+  "packageManager": "bun@1.4.2",
   "description": "Browse saved and sidebar bookmarks and safely manage Zen workspaces from one command-line interface.",
   "type": "module",
   "bin": {
@@ -31,6 +32,9 @@
   ],
   "author": "Wyatt Johnson",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wyattjoh/zen-bookmarks.git"

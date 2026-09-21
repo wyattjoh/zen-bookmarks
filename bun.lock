@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "zen-bookmarks",
+      "name": "@wyattjoh/zen-bookmarks",
       "dependencies": {
         "@modelcontextprotocol/server": "^2.0.0",
         "@opentui/core": "^0.5.11",
