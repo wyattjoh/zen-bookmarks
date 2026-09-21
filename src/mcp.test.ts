@@ -121,11 +121,19 @@ describe("MCP server", () => {
       ...initializeMessages(),
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
     ]);
+    const initialize = responses.find((response) => response.id === 1)?.result;
     const tools = responses.find((response) => response.id === 2)?.result?.tools as Array<{
       name: string;
+      title: string;
+      description: string;
       inputSchema: Record<string, unknown>;
+      outputSchema: Record<string, unknown> | undefined;
+      annotations: Record<string, unknown>;
     }>;
 
+    expect(initialize?.instructions).toContain("Use search first");
+    expect(initialize?.instructions).toContain("Never call search more than four times");
+    expect(initialize?.instructions).toContain("minRelevance 0.15");
     expect(tools.map((tool) => tool.name)).toEqual([
       "status",
       "auth_status",
@@ -148,6 +156,54 @@ describe("MCP server", () => {
       "workspace_move",
       "workspace_remove",
     ]);
+    expect(tools.every((tool) => tool.title.length > 0)).toBe(true);
+
+    const search = tools.find((tool) => tool.name === "search");
+    expect(search).toMatchObject({
+      title: "Find Relevant Sidebar Bookmarks",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          result: { type: "array" },
+        },
+        required: ["result"],
+      },
+    });
+    expect(search?.description).toContain("Preferred first tool");
+    expect(search?.description).toContain("at most four diverse focused intents");
+    expect(search?.description).toContain("workspaceName and folderPath");
+    expect(search?.inputSchema).toMatchObject({
+      properties: {
+        limit: {
+          default: 8,
+          maximum: 8,
+        },
+        minRelevance: {
+          description: expect.stringContaining("use 0.15 for exploratory discovery"),
+        },
+      },
+    });
+
+    expect(tools.find((tool) => tool.name === "status")?.outputSchema).toMatchObject({
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        bookmarks: { type: "integer", minimum: 0 },
+      },
+    });
+    expect(tools.find((tool) => tool.name === "list")?.outputSchema).toMatchObject({
+      type: "object",
+      properties: {
+        workspaces: { type: "array" },
+      },
+      required: ["workspaces"],
+    });
     expect(tools.find((tool) => tool.name === "bookmark_add")?.inputSchema).toMatchObject({
       type: "object",
       properties: {
@@ -173,6 +229,12 @@ describe("MCP server", () => {
         jsonrpc: "2.0",
         id: 3,
         method: "tools/call",
+        params: { name: "list", arguments: { sessions: path } },
+      },
+      {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
         params: {
           name: "bookmark_update",
           arguments: {
@@ -184,12 +246,21 @@ describe("MCP server", () => {
       },
     ]);
     const status = responses.find((response) => response.id === 2)?.result;
-    const mutation = responses.find((response) => response.id === 3)?.result;
+    const list = responses.find((response) => response.id === 3)?.result;
+    const mutation = responses.find((response) => response.id === 4)?.result;
 
     expect(status?.structuredContent).toMatchObject({
       path,
       workspaces: 1,
       bookmarks: 1,
+    });
+    expect(list?.structuredContent).toMatchObject({
+      workspaces: [
+        {
+          id: "workspace-1",
+          bookmarks: [{ id: "bookmark-1", url: "https://example.com" }],
+        },
+      ],
     });
     expect(mutation?.structuredContent).toMatchObject({ dryRun: true, path });
     expect(mutation?.isError).not.toBe(true);

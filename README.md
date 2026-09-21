@@ -67,7 +67,9 @@ A typical MCP client configuration is:
 }
 ```
 
-The server exposes `status`, `auth_status`, `list`, `verify`, `export`, `index`, `search`, and `import_html`, plus `bookmark_*`, `folder_*`, and `workspace_*` CRUD tools. Every tool accepts typed inputs instead of raw CLI arguments. Use `sessions` for an exact `zen-sessions.jsonlz4` path or `profile` for a unique profile substring.
+The server exposes `status`, `auth_status`, `list`, `verify`, `export`, `index`, `search`, and `import_html`, plus `bookmark_*`, `folder_*`, and `workspace_*` CRUD tools. Every tool advertises a human-readable title, behavioral annotations, and typed inputs instead of raw CLI arguments. `status`, `list`, and `search` also advertise output schemas for their `structuredContent`. Server instructions route relevance requests to `search`, bound project discovery to at most four focused calls with explicit stopping rules, reserve the potentially large `list` result for exhaustive sidebar inspection and stable-ID lookup, and explain that search results already contain workspace and folder locations. Each search returns at most eight results. Use `sessions` for an exact `zen-sessions.jsonlz4` path or `profile` for a unique profile substring.
+
+MCP tools operate on pinned Zen sidebar bookmarks. Firefox-style saved bookmarks from `places.sqlite` are available in the interactive browser, not through `search` or `list`.
 
 Mutation tools default to `apply: false`, which runs the existing `--dry-run` path without closing Zen or writing files. Set `apply: true` only after reviewing that result; the server then uses the CLI's non-interactive `--yes` lifecycle, including validation, backup, atomic replacement, and reopening Zen when appropriate. The optional `reopen` boolean maps to `--reopen` or `--no-reopen`.
 

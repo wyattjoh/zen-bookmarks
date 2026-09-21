@@ -22,12 +22,16 @@ const sessionFields = {
     .string()
     .min(1)
     .optional()
-    .describe("Explicit path to zen-sessions.jsonlz4"),
+    .describe(
+      "Exact zen-sessions.jsonlz4 path. Usually omit this and let default profile discovery resolve the session.",
+    ),
   profile: z
     .string()
     .min(1)
     .optional()
-    .describe("Zen profile directory name or unique substring"),
+    .describe(
+      "Zen profile directory name or unique substring. Use only when default profile discovery is ambiguous.",
+    ),
 };
 
 const mutationFields = {
@@ -35,11 +39,13 @@ const mutationFields = {
   apply: z
     .boolean()
     .default(false)
-    .describe("Apply the mutation. Defaults to false, which performs a dry run."),
+    .describe(
+      "Apply the mutation. Leave false for the default safe dry run; set true only after the user approves the preview.",
+    ),
   reopen: z
     .boolean()
     .optional()
-    .describe("Whether to reopen Zen after an applied mutation if it was running"),
+    .describe("Reopen Zen after an applied mutation when it was running before the change."),
 };
 
 const readOnlyAnnotations = {
@@ -62,6 +68,69 @@ const searchAnnotations = {
   idempotentHint: true,
   openWorldHint: true,
 };
+
+const serverInstructions = [
+  "Use search first when the user asks for relevant, useful, or topic-matching sidebar bookmarks.",
+  "For exploratory project discovery, choose at most four diverse natural-language intents before starting, then issue one search call per intent sequentially with minRelevance 0.15 and limit 5 to 8.",
+  "Never call search more than four times for one request. Stop earlier once you have 3 to 8 strong distinct matches or when two consecutive searches add no useful URLs; deduplicate by URL and do not retry below minRelevance 0.15 unless the user explicitly requests exhaustive low-confidence results.",
+  "Search results already include workspaceName and folderPath, so do not call status or list merely to locate a result.",
+  "Do not call index before search because search lazily populates its cache.",
+  "Use list only for exhaustive sidebar browsing, exact stable-ID resolution, mutation preparation, or fallback after search fails.",
+  "The MCP tools cover pinned Zen sidebar bookmarks; Firefox-style saved bookmarks from places.sqlite are available only through the interactive browser.",
+  "Mutations default to a dry run. Show that preview and obtain approval before calling the same tool with apply true.",
+].join(" ");
+
+const sidebarBookmarkOutputSchema = z.object({
+  id: z.string().describe("Stable sidebar bookmark ID"),
+  title: z.string(),
+  url: z.string(),
+  currentUrl: z.string().optional(),
+  workspaceId: z.string(),
+  folderId: z.string().optional(),
+  index: z.number().int().nonnegative(),
+});
+
+const sidebarFolderOutputSchema: z.ZodType<unknown> = z.lazy(() =>
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    workspaceId: z.string(),
+    parentId: z.string().optional(),
+    folders: z.array(sidebarFolderOutputSchema),
+    bookmarks: z.array(sidebarBookmarkOutputSchema),
+  }),
+);
+
+const sidebarTreeOutputSchema = z.object({
+  workspaces: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      folders: z.array(sidebarFolderOutputSchema),
+      bookmarks: z.array(sidebarBookmarkOutputSchema),
+    }),
+  ),
+});
+
+const statusOutputSchema = z.object({
+  path: z.string(),
+  profile: z.string().optional(),
+  zenRunning: z.boolean(),
+  workspaces: z.number().int().nonnegative(),
+  folders: z.number().int().nonnegative(),
+  bookmarks: z.number().int().nonnegative(),
+});
+
+const searchOutputSchema = z.object({
+  result: z.array(
+    sidebarBookmarkOutputSchema.extend({
+      workspaceName: z.string(),
+      folderPath: z.array(z.string()),
+      retrievalScore: z.number(),
+      relevance: z.number().min(0).max(1),
+    }),
+  ),
+});
 
 function appendOption(
   argv: string[],
@@ -148,14 +217,20 @@ async function callCli(executor: CliExecutor, argv: string[]): Promise<CallToolR
 export function createZenBookmarksMcpServer(
   executor: CliExecutor = executeCli,
 ): McpServer {
-  const server = new McpServer({ name: "zen-bookmarks", version: "0.2.0" });
+  const server = new McpServer(
+    { name: "zen-bookmarks", version: "0.2.0", title: "Zen Bookmarks" },
+    { instructions: serverInstructions },
+  );
   const run = (argv: string[]): Promise<CallToolResult> => callCli(executor, argv);
 
   server.registerTool(
     "status",
     {
-      description: "Inspect the selected Zen profile and count its workspaces, folders, and bookmarks.",
+      title: "Inspect Zen Profile",
+      description:
+        "Diagnose profile selection and count pinned sidebar bookmarks, folders, and workspaces. Do not call this before search or list when default profile discovery works.",
       inputSchema: z.object(sessionFields),
+      outputSchema: statusOutputSchema,
       annotations: readOnlyAnnotations,
     },
     async (input) => {
@@ -168,7 +243,9 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "auth_status",
     {
-      description: "Report whether a TypeSafe API key is configured in the operating system credential store.",
+      title: "Check TypeSafe Credentials",
+      description:
+        "Diagnose whether relevance search credentials are configured. Call only when the user asks or search reports a credential error.",
       inputSchema: z.object({}),
       annotations: readOnlyAnnotations,
     },
@@ -178,8 +255,11 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "list",
     {
-      description: "List the complete typed workspace, folder, and sidebar-bookmark tree with stable IDs.",
+      title: "List Sidebar Bookmark Tree",
+      description:
+        "Return the complete recursive pinned-sidebar tree with stable workspace, folder, and bookmark IDs. This can be large: use only for exhaustive browsing, exact ID resolution, mutation preparation, or fallback after search fails. It does not include Firefox-style saved bookmarks from places.sqlite.",
       inputSchema: z.object(sessionFields),
+      outputSchema: sidebarTreeOutputSchema,
       annotations: readOnlyAnnotations,
     },
     async (input) => {
@@ -192,7 +272,9 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "verify",
     {
-      description: "Verify mozLz4 round-trip fidelity and structural validity for a Zen session.",
+      title: "Verify Zen Session",
+      description:
+        "Verify mozLz4 round-trip fidelity and structural validity. Use before applying mutations, not for ordinary search or browsing.",
       inputSchema: z.object(sessionFields),
       annotations: readOnlyAnnotations,
     },
@@ -206,7 +288,8 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "export",
     {
-      description: "Export sidebar bookmarks as JSON, YAML, and Netscape HTML files.",
+      title: "Export Sidebar Bookmarks",
+      description: "Export pinned sidebar bookmarks as JSON, YAML, and Netscape HTML files.",
       inputSchema: z.object({
         ...sessionFields,
         out: z.string().min(1).describe("Output directory"),
@@ -223,11 +306,16 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "index",
     {
-      description: "Fetch and classify sidebar bookmark content into the persistent search cache.",
+      title: "Index Sidebar Bookmark Content",
+      description:
+        "Explicitly prewarm or refresh the persistent relevance-search cache. Do not call before search: search lazily indexes missing content itself. This tool fetches public pages and uses TypeSafe classification.",
       inputSchema: z.object({
         ...sessionFields,
-        cache: z.string().min(1).optional().describe("Override the search-cache path"),
-        refresh: z.boolean().default(false).describe("Replace existing cached content"),
+        cache: z.string().min(1).optional().describe("Override the search-cache path."),
+        refresh: z
+          .boolean()
+          .default(false)
+          .describe("Refetch and reclassify content already present in the cache."),
       }),
       annotations: searchAnnotations,
     },
@@ -243,19 +331,33 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "search",
     {
-      description: "Search sidebar bookmarks with local BM25 retrieval and TypeSafe relevance reranking.",
+      title: "Find Relevant Sidebar Bookmarks",
+      description:
+        "Preferred first tool for finding useful or topic-matching pinned Zen sidebar bookmarks. Uses local BM25 retrieval plus TypeSafe reranking and lazily indexes missing public content. For project discovery choose at most four diverse focused intents, issue their calls sequentially, and stop earlier after finding 3 to 8 strong distinct URLs or after two calls add nothing useful. Use minRelevance 0.15; do not retry below it unless the user explicitly requests exhaustive low-confidence results. Results already include workspaceName and folderPath, so do not call status or list to locate them. Does not search Firefox-style saved bookmarks from places.sqlite.",
       inputSchema: z.object({
         ...sessionFields,
-        query: z.string().min(1).describe("Natural-language search query"),
-        cache: z.string().min(1).optional().describe("Override the search-cache path"),
-        limit: z.number().int().positive().optional().describe("Maximum result count"),
+        query: z
+          .string()
+          .min(1)
+          .describe("One focused natural-language search intent; avoid unrelated keyword lists."),
+        cache: z.string().min(1).optional().describe("Override the search-cache path."),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(8)
+          .default(8)
+          .describe("Maximum result count for this query, capped at 8."),
         minRelevance: z
           .number()
           .min(0)
           .max(1)
           .optional()
-          .describe("Minimum relevance score from 0 to 1"),
+          .describe(
+            "Minimum TypeSafe relevance score from 0 to 1. Defaults to a strict 0.5; use 0.15 for exploratory discovery.",
+          ),
       }),
+      outputSchema: searchOutputSchema,
       annotations: searchAnnotations,
     },
     async (input) => {
@@ -271,6 +373,7 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "import_html",
     {
+      title: "Import Bookmark HTML",
       description: "Rebuild one workspace's pinned tree from a Netscape HTML bookmark file. Dry-runs by default.",
       inputSchema: z.object({
         ...mutationFields,
@@ -290,7 +393,8 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "bookmark_add",
     {
-      description: "Add a sidebar bookmark. Dry-runs by default.",
+      title: "Add Sidebar Bookmark",
+      description: "Add a pinned sidebar bookmark. Dry-runs by default.",
       inputSchema: z.object({
         ...mutationFields,
         url: z.url().describe("Bookmark URL"),
@@ -313,7 +417,8 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "bookmark_update",
     {
-      description: "Update a sidebar bookmark selected by stable ID or old URL. Dry-runs by default.",
+      title: "Update Sidebar Bookmark",
+      description: "Update a pinned sidebar bookmark selected by stable ID or old URL. Dry-runs by default.",
       inputSchema: z
         .object({
           ...mutationFields,
@@ -341,7 +446,8 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "bookmark_move",
     {
-      description: "Move a sidebar bookmark to a workspace or folder. Dry-runs by default.",
+      title: "Move Sidebar Bookmark",
+      description: "Move a pinned sidebar bookmark to a workspace or folder. Dry-runs by default.",
       inputSchema: z
         .object({
           ...mutationFields,
@@ -373,7 +479,8 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "bookmark_remove",
     {
-      description: "Remove sidebar bookmarks selected by stable ID or URL. Dry-runs by default.",
+      title: "Remove Sidebar Bookmark",
+      description: "Remove pinned sidebar bookmarks selected by stable ID or URL. Dry-runs by default.",
       inputSchema: z
         .object({
           ...mutationFields,
@@ -403,6 +510,7 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "folder_add",
     {
+      title: "Add Sidebar Folder",
       description: "Add a sidebar folder. Dry-runs by default.",
       inputSchema: z.object({
         ...mutationFields,
@@ -424,6 +532,7 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "folder_update",
     {
+      title: "Rename Sidebar Folder",
       description: "Rename a sidebar folder selected by stable ID or name. Dry-runs by default.",
       inputSchema: z
         .object({
@@ -451,6 +560,7 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "folder_move",
     {
+      title: "Move Sidebar Folder",
       description: "Move a sidebar folder to another parent or workspace. Dry-runs by default.",
       inputSchema: z
         .object({
@@ -481,6 +591,7 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "folder_remove",
     {
+      title: "Remove Sidebar Folder",
       description: "Remove a sidebar folder. Non-empty folders require recursive=true. Dry-runs by default.",
       inputSchema: z
         .object({
@@ -509,6 +620,7 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "workspace_add",
     {
+      title: "Add Zen Workspace",
       description: "Add a Zen workspace. Dry-runs by default.",
       inputSchema: z.object({
         ...mutationFields,
@@ -526,6 +638,7 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "workspace_update",
     {
+      title: "Rename Zen Workspace",
       description: "Rename a workspace selected by stable ID or name. Dry-runs by default.",
       inputSchema: z
         .object({
@@ -551,6 +664,7 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "workspace_move",
     {
+      title: "Reorder Zen Workspace",
       description: "Move a workspace to a zero-based index. Dry-runs by default.",
       inputSchema: z
         .object({
@@ -576,6 +690,7 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "workspace_remove",
     {
+      title: "Remove Zen Workspace",
       description: "Remove a workspace. Non-empty workspaces require recursive=true. Dry-runs by default.",
       inputSchema: z
         .object({

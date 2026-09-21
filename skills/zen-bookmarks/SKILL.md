@@ -1,13 +1,25 @@
 ---
 name: zen-bookmarks
-description: Operates the zen-bookmarks CLI to browse saved and sidebar bookmarks and manage Zen Browser's sidebar folders and workspaces. Use when asked to "list Zen bookmarks", "browse Zen bookmarks", "manage Zen sidebar pins", "add or move a Zen bookmark", "manage Zen folders or workspaces", "import bookmarks into Zen", "export Zen bookmarks", or interact with `zen-bookmarks`, `places.sqlite`, `zen-sessions.jsonlz4`, or Zen profile bookmark data.
+description: Operates the zen-bookmarks CLI and MCP server to search and browse saved or sidebar bookmarks and manage Zen Browser's sidebar folders and workspaces. Use when asked to "find relevant Zen bookmarks", "list Zen bookmarks", "browse Zen bookmarks", "manage Zen sidebar pins", "add or move a Zen bookmark", "manage Zen folders or workspaces", "import bookmarks into Zen", "export Zen bookmarks", or interact with `zen-bookmarks`, its MCP tools, `places.sqlite`, `zen-sessions.jsonlz4`, or Zen profile bookmark data.
 license: MIT
 compatibility: Requires macOS, Zen Browser, and Bun 1.3 or newer. The `zen-bookmarks` executable must be linked or run from this repository with `bun src/zen-bookmarks.ts`.
 ---
 
-# Zen Bookmarks CLI
+# Zen Bookmarks
 
-Use the unified `zen-bookmarks` CLI to browse Zen bookmarks and modify the browser's sidebar. “Bookmarks” collectively means saved bookmarks from `places.sqlite` and pinned sidebar links/tabs from `zen-sessions.jsonlz4`. Saved bookmarks are browse-only; mutation commands manage sidebar bookmarks, folders, and workspaces.
+Use the unified `zen-bookmarks` CLI or its MCP server to browse Zen bookmarks and modify the browser's sidebar. “Bookmarks” collectively means saved bookmarks from `places.sqlite` and pinned sidebar links/tabs from `zen-sessions.jsonlz4`. Saved bookmarks are browse-only; mutation commands manage sidebar bookmarks, folders, and workspaces.
+
+## Route the request
+
+Choose one route before calling tools:
+
+- **Relevant/helpful sidebar bookmarks via MCP:** use the MCP `search` fast path below. Do not call `status`, `auth_status`, `index`, or `list` first.
+- **Explicitly exhaustive sidebar browsing or exact ID lookup:** call `list` once and filter its `structuredContent` inside the same client-side script. Do not repeatedly re-list or emit the full tree.
+- **Saved bookmarks from `places.sqlite`:** explain that MCP `search` and `list` cover only pinned sidebar bookmarks; use the interactive browser when saved-bookmark coverage is required.
+- **Mutation:** establish the exact profile/session, inspect stable IDs, and follow the dry-run workflow.
+- **Interactive browsing:** launch the TUI only when the user requests an interactive terminal browser or needs saved bookmarks.
+
+For a relevance request, keep the normal budget to one project-context tool turn and one batched MCP tool turn after loading this skill. Exceed that budget only for a concrete tool error, ambiguous profile, or an explicit request for exhaustive coverage.
 
 ## Choose the executable
 
@@ -31,13 +43,63 @@ Run `zen-bookmarks mcp` to expose typed stdio MCP tools for status, list, verifi
 
 The MCP server intentionally excludes credential entry and deletion because MCP calls may be logged. Use `zen-bookmarks login` or `zen-bookmarks auth delete` directly in a trusted terminal.
 
+### Find relevant bookmarks efficiently
+
+When the user asks which bookmarks might help with a project or topic and MCP is available or explicitly requested, use the MCP `search` tool rather than enumerating the complete bookmark tree:
+
+1. Use context already supplied by the user. If more is necessary, read **at most one** concise project overview—prefer `README.md`; do not also read `package.json` or tour the repository.
+2. Identify four distinct intents and send one focused natural-language query per intent, such as `terminal UI testing` or `agent-friendly CLI design`. Do not combine unrelated technologies into one keyword-heavy query.
+3. Batch every query into one MCP client round trip. For exploratory discovery, use a modest `limit` such as 5–8 and `minRelevance: 0.15`; shortlist at most two results per intent before combining them.
+4. Unwrap the MCP client response before ranking. In Pi's `mcpScript`, `tools.call()` returns an `{ ok, data }` envelope; the CLI's structured search array is `response.data.structuredContent.result`.
+5. Deduplicate results by URL, preserve at least one strong result from each successful intent before filling remaining slots by relevance, and report `title`, `url`, `workspaceName`, `folderPath`, and `relevance` when available.
+6. Stop once 5–8 useful, diverse results have enough context to answer. Search already returns workspace and folder locations, so do not call `list` to rediscover them.
+
+`search` and `list` cover pinned sidebar bookmarks only. If the user explicitly requires saved bookmarks from `places.sqlite`, explain that limitation and use the interactive browser rather than claiming MCP coverage.
+
+A single Pi `mcpScript` can perform discovery and all searches without intermediate schema-probing calls:
+
+```javascript
+const found = await tools.search({ query: "zen-bookmarks search" });
+const searchTool = found.items.find((item) => item.path === "zen-bookmarks_search");
+if (!searchTool) return emit({ error: "zen-bookmarks search tool not found" });
+
+const queries = [
+  "terminal UI testing",
+  "agent-friendly CLI design",
+  "MCP server patterns",
+  "browser session storage",
+];
+const matches = [];
+for (const query of queries) {
+  const response = await tools.call(searchTool.path, { query, limit: 6, minRelevance: 0.15 });
+  if (!response.ok) return emit({ query, error: response.error });
+  const results = response.data?.structuredContent?.result;
+  if (!Array.isArray(results)) return emit({ query, error: "unexpected search response" });
+  const ranked = [...results].sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+  matches.push(...ranked.slice(0, 2).map((result) => ({ ...result, matchedQuery: query })));
+}
+
+const unique = [...new Map(matches.map((result) => [result.url, result])).values()];
+const firstPerQuery = queries.flatMap((query) => {
+  const match = unique.find((result) => result.matchedQuery === query);
+  return match ? [match] : [];
+});
+const selectedUrls = new Set(firstPerQuery.map((result) => result.url));
+const remaining = unique
+  .filter((result) => !selectedUrls.has(result.url))
+  .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+return emit([...firstPerQuery, ...remaining].slice(0, 8));
+```
+
+Do not call `auth_status` before every search; call it only when the user asks or when `search` reports a credential problem. Use `list` instead of `search` only for exhaustive browsing, exact ID resolution, mutation preparation, or as a fallback when relevance search is unavailable.
+
 ## Browse interactively
 
 Run `zen-bookmarks` without arguments in an interactive terminal to open the OpenTUI bookmark browser. It shows saved and sidebar bookmarks in folder trees (including empty folders) that start fully collapsed, with focused workspace, persistent search, bookmark-list, and detail regions. `Tab` cycles forward through Zen workspaces such as Personal and Work, while `Shift-Tab` cycles backward; saved bookmarks remain visible in every workspace view. `/` focuses fuzzy search. Arrow keys move between regions, `j`/`k` navigate bookmarks or scroll details, and Page Up/Page Down moves by a page. Right opens details or expands a collapsed folder; Left returns to bookmarks or collapses a folder; Enter toggles folders. Mouse clicks transfer focus. Lowercase `r` re-scrapes and reclassifies the selected URL and requires a stored TypeSafe API key. Uppercase `R` reloads saved and sidebar bookmarks from the current Zen profile's on-disk databases. In non-TTY automation, an argument-free invocation prints help instead.
 
 ## Establish the session
 
-Start with read-only discovery:
+Use read-only profile and tree discovery before exact inspection or mutation. Do not run this sequence before an MCP relevance-only search unless profile discovery is ambiguous or search is unavailable:
 
 ```bash
 zen-bookmarks status --json

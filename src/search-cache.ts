@@ -83,6 +83,7 @@ export function defaultSearchCachePath(): string {
 export function openSearchCache(path = defaultSearchCachePath()): SearchCache {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const database = new Database(path, { create: true });
+  database.exec("PRAGMA busy_timeout = 5000");
   database.exec("PRAGMA journal_mode = WAL");
   database.exec(`
     CREATE TABLE IF NOT EXISTS links (
