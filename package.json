@@ -40,32 +40,15 @@
     "url": "https://github.com/wyattjoh/zen-bookmarks/issues"
   },
   "files": [
-    "src/zen-bookmarks.ts",
-    "src/cli.ts",
-    "src/tui.tsx",
-    "src/tui-data.ts",
-    "src/places-bookmarks.ts",
-    "src/credential-store.ts",
-    "src/bookmark-candidates.ts",
-    "src/bm25.ts",
-    "src/link-index.ts",
-    "src/search-cache.ts",
-    "src/typesafe-search.ts",
-    "src/exporters.ts",
-    "src/session-store.ts",
-    "src/sidebar.ts",
-    "src/zen-process.ts",
-    "src/extract-bookmarks.ts",
-    "src/update-bookmarks.ts",
-    "src/mozlz4.ts",
-    "README.md",
-    "LICENSE"
+    "src"
   ],
   "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
     "@opentui/core": "^0.5.11",
     "@opentui/react": "^0.5.11",
     "@typesafe-ai/sdk": "^0.6.0",
-    "react": "^19.3.0"
+    "react": "^19.3.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

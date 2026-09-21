@@ -15,6 +15,7 @@ Run `zen-bookmarks` without arguments in a terminal to open the interactive book
 - OS-native TypeSafe credential storage through Bun Secrets
 - Full CRUD for sidebar bookmarks, folders, and workspaces
 - JSON output with stable Zen IDs for scripting and unambiguous targeting
+- Typed MCP tools for read, search, export, import, and sidebar CRUD operations
 - Interactive Zen lifecycle management for writes on macOS
 - Timestamped backup before every write
 - Optimistic concurrency check, structural validation, durable temporary write, and atomic rename
@@ -44,6 +45,33 @@ bun src/zen-bookmarks.ts --help
 ```
 
 Run `bun install` to install the TypeSafe SDK and development dependencies.
+
+## MCP server
+
+Serve the CLI operations as typed [Model Context Protocol](https://modelcontextprotocol.io) tools over stdio:
+
+```bash
+zen-bookmarks mcp
+```
+
+A typical MCP client configuration is:
+
+```json
+{
+  "mcpServers": {
+    "zen-bookmarks": {
+      "command": "zen-bookmarks",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The server exposes `status`, `auth_status`, `list`, `verify`, `export`, `index`, `search`, and `import_html`, plus `bookmark_*`, `folder_*`, and `workspace_*` CRUD tools. Every tool accepts typed inputs instead of raw CLI arguments. Use `sessions` for an exact `zen-sessions.jsonlz4` path or `profile` for a unique profile substring.
+
+Mutation tools default to `apply: false`, which runs the existing `--dry-run` path without closing Zen or writing files. Set `apply: true` only after reviewing that result; the server then uses the CLI's non-interactive `--yes` lifecycle, including validation, backup, atomic replacement, and reopening Zen when appropriate. The optional `reopen` boolean maps to `--reopen` or `--no-reopen`.
+
+Credential entry and deletion are intentionally not exposed over MCP because tool arguments and calls may be logged by clients. Configure TypeSafe access locally with `zen-bookmarks login`; `index` and `search` then use the stored credential. The interactive TUI also remains a terminal-only interface.
 
 ## Interactive browser
 

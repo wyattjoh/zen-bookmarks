@@ -4,7 +4,10 @@ import { runCli } from "./cli.ts";
 const argv = process.argv.slice(2);
 
 try {
-  if (argv.length === 0 && process.stdin.isTTY && process.stdout.isTTY) {
+  if (argv[0] === "mcp") {
+    const { runMcpServer } = await import("./mcp.ts");
+    runMcpServer();
+  } else if (argv.length === 0 && process.stdin.isTTY && process.stdout.isTTY) {
     const { runTui } = await import("./tui.tsx");
     await runTui();
   } else {

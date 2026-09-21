@@ -25,6 +25,12 @@ bun src/zen-bookmarks.ts --help
 
 Use the chosen form consistently. Do not run `bun link` or install anything unless the user asks. The CLI exposes only global help; do not expect command-specific `--help` output.
 
+## Serve over MCP
+
+Run `zen-bookmarks mcp` to expose typed stdio MCP tools for status, list, verification, export, indexing, search, HTML import, and bookmark/folder/workspace CRUD. Mutation tools use `apply: false` by default, which performs the same safe dry run as `--dry-run`; set `apply: true` only after showing the dry-run result and receiving confirmation. Use the tool's `reopen` boolean to control the Zen lifecycle when applying.
+
+The MCP server intentionally excludes credential entry and deletion because MCP calls may be logged. Use `zen-bookmarks login` or `zen-bookmarks auth delete` directly in a trusted terminal.
+
 ## Browse interactively
 
 Run `zen-bookmarks` without arguments in an interactive terminal to open the OpenTUI bookmark browser. It shows saved and sidebar bookmarks in folder trees (including empty folders) that start fully collapsed, with focused workspace, persistent search, bookmark-list, and detail regions. `Tab` cycles forward through Zen workspaces such as Personal and Work, while `Shift-Tab` cycles backward; saved bookmarks remain visible in every workspace view. `/` focuses fuzzy search. Arrow keys move between regions, `j`/`k` navigate bookmarks or scroll details, and Page Up/Page Down moves by a page. Right opens details or expands a collapsed folder; Left returns to bookmarks or collapses a folder; Enter toggles folders. Mouse clicks transfer focus. Lowercase `r` re-scrapes and reclassifies the selected URL and requires a stored TypeSafe API key. Uppercase `R` reloads saved and sidebar bookmarks from the current Zen profile's on-disk databases. In non-TTY automation, an argument-free invocation prints help instead.
