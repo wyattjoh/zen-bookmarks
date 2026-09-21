@@ -1,13 +1,13 @@
 ---
 name: zen-bookmarks
-description: Operates the zen-bookmarks CLI to inspect and manage Zen Browser's pinned sidebar, including bookmarks, folders, and workspaces. Use when asked to "list Zen bookmarks", "manage Zen sidebar pins", "add or move a Zen bookmark", "manage Zen folders or workspaces", "import bookmarks into Zen", "export Zen bookmarks", or interact with `zen-bookmarks`, `zen-sessions.jsonlz4`, or Zen profile sidebar data.
+description: Operates the zen-bookmarks CLI to browse saved and sidebar bookmarks and manage Zen Browser's sidebar folders and workspaces. Use when asked to "list Zen bookmarks", "browse Zen bookmarks", "manage Zen sidebar pins", "add or move a Zen bookmark", "manage Zen folders or workspaces", "import bookmarks into Zen", "export Zen bookmarks", or interact with `zen-bookmarks`, `places.sqlite`, `zen-sessions.jsonlz4`, or Zen profile bookmark data.
 license: MIT
-compatibility: Requires macOS, Zen Browser, and Bun 1.0 or newer. The `zen-bookmarks` executable must be linked or run from this repository with `bun zen-bookmarks.ts`.
+compatibility: Requires macOS, Zen Browser, and Bun 1.3 or newer. The `zen-bookmarks` executable must be linked or run from this repository with `bun src/zen-bookmarks.ts`.
 ---
 
 # Zen Bookmarks CLI
 
-Use the unified `zen-bookmarks` CLI to inspect or modify Zen Browser's pinned sidebar. It manages pinned tabs, folders, and workspaces in `zen-sessions.jsonlz4`; it does not manage Firefox-style bookmarks in `places.sqlite`.
+Use the unified `zen-bookmarks` CLI to browse Zen bookmarks and modify the browser's sidebar. “Bookmarks” collectively means saved bookmarks from `places.sqlite` and pinned sidebar links/tabs from `zen-sessions.jsonlz4`. Saved bookmarks are browse-only; mutation commands manage sidebar bookmarks, folders, and workspaces.
 
 ## Choose the executable
 
@@ -17,13 +17,17 @@ Prefer the linked command:
 zen-bookmarks --help
 ```
 
-If it is unavailable and the current repository contains `zen-bookmarks.ts`, use:
+If it is unavailable and the current repository contains `src/zen-bookmarks.ts`, use:
 
 ```bash
-bun zen-bookmarks.ts --help
+bun src/zen-bookmarks.ts --help
 ```
 
 Use the chosen form consistently. Do not run `bun link` or install anything unless the user asks. The CLI exposes only global help; do not expect command-specific `--help` output.
+
+## Browse interactively
+
+Run `zen-bookmarks` without arguments in an interactive terminal to open the OpenTUI bookmark browser. It shows saved and sidebar bookmarks in folder trees (including empty folders) that start fully collapsed, with focused workspace, persistent search, bookmark-list, and detail regions. `Tab` cycles forward through Zen workspaces such as Personal and Work, while `Shift-Tab` cycles backward; saved bookmarks remain visible in every workspace view. `/` focuses fuzzy search. Arrow keys move between regions, `j`/`k` navigate bookmarks or scroll details, and Page Up/Page Down moves by a page. Right opens details or expands a collapsed folder; Left returns to bookmarks or collapses a folder; Enter toggles folders. Mouse clicks transfer focus. Lowercase `r` re-scrapes and reclassifies the selected URL and requires a stored TypeSafe API key. Uppercase `R` reloads saved and sidebar bookmarks from the current Zen profile's on-disk databases. In non-TTY automation, an argument-free invocation prints help instead.
 
 ## Establish the session
 

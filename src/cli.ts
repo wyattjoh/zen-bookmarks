@@ -108,9 +108,10 @@ const BOOLEAN_FLAGS = new Set([
   "yes",
 ]);
 
-const HELP = `zen-bookmarks — manage Zen's pinned sidebar offline
+const HELP = `zen-bookmarks — browse and manage Zen bookmarks
 
 Usage:
+  zen-bookmarks                 Open the interactive bookmark browser (TTY only)
   zen-bookmarks status [options]
   zen-bookmarks list [--json] [--verbose] [options]
   zen-bookmarks verify [options]

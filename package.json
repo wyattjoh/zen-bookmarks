@@ -1,17 +1,17 @@
 {
   "name": "zen-bookmarks",
   "version": "0.2.0",
-  "description": "Read and manage Zen browser sidebar bookmarks, folders, and workspaces from a safe command-line interface.",
+  "description": "Browse saved and sidebar bookmarks and safely manage Zen workspaces from one command-line interface.",
   "type": "module",
   "bin": {
-    "zen-bookmarks": "./zen-bookmarks.ts",
-    "zen-bookmarks-export": "./extract-bookmarks.ts",
-    "zen-bookmarks-update": "./update-bookmarks.ts"
+    "zen-bookmarks": "./src/zen-bookmarks.ts",
+    "zen-bookmarks-export": "./src/extract-bookmarks.ts",
+    "zen-bookmarks-update": "./src/update-bookmarks.ts"
   },
   "scripts": {
-    "start": "bun zen-bookmarks.ts",
-    "export": "bun zen-bookmarks.ts export",
-    "update": "bun update-bookmarks.ts",
+    "start": "bun src/zen-bookmarks.ts",
+    "export": "bun src/zen-bookmarks.ts export",
+    "update": "bun src/update-bookmarks.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
@@ -40,29 +40,36 @@
     "url": "https://github.com/wyattjoh/zen-bookmarks/issues"
   },
   "files": [
-    "zen-bookmarks.ts",
-    "cli.ts",
-    "credential-store.ts",
-    "bookmark-candidates.ts",
-    "bm25.ts",
-    "link-index.ts",
-    "search-cache.ts",
-    "typesafe-search.ts",
-    "exporters.ts",
-    "session-store.ts",
-    "sidebar.ts",
-    "zen-process.ts",
-    "extract-bookmarks.ts",
-    "update-bookmarks.ts",
-    "mozlz4.ts",
+    "src/zen-bookmarks.ts",
+    "src/cli.ts",
+    "src/tui.tsx",
+    "src/tui-data.ts",
+    "src/places-bookmarks.ts",
+    "src/credential-store.ts",
+    "src/bookmark-candidates.ts",
+    "src/bm25.ts",
+    "src/link-index.ts",
+    "src/search-cache.ts",
+    "src/typesafe-search.ts",
+    "src/exporters.ts",
+    "src/session-store.ts",
+    "src/sidebar.ts",
+    "src/zen-process.ts",
+    "src/extract-bookmarks.ts",
+    "src/update-bookmarks.ts",
+    "src/mozlz4.ts",
     "README.md",
     "LICENSE"
   ],
   "dependencies": {
-    "@typesafe-ai/sdk": "^0.6.0"
+    "@opentui/core": "^0.5.11",
+    "@opentui/react": "^0.5.11",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "react": "^19.3.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
+    "@types/react": "^19.3.0",
     "typescript": "^7.0.2"
   }
 }

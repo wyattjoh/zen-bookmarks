@@ -128,6 +128,18 @@ describe("unified CLI", () => {
     expect(result.stdout.toString()).toContain("Read commands work while Zen is open");
   });
 
+  test("prints help instead of opening the TUI when output is not interactive", () => {
+    const result = Bun.spawnSync({
+      cmd: ["bun", "zen-bookmarks.ts"],
+      cwd: import.meta.dir,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain("Open the interactive bookmark browser");
+  });
+
   test("stores credentials and searches with injected TypeSafe judgments", async () => {
     const path = fixturePath();
     const store = memorySecretStore();
