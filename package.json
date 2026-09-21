@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "engines": {
-    "bun": ">=1.0.0"
+    "bun": ">=1.3.0"
   },
   "keywords": [
     "zen",
@@ -42,6 +42,12 @@
   "files": [
     "zen-bookmarks.ts",
     "cli.ts",
+    "credential-store.ts",
+    "bookmark-candidates.ts",
+    "bm25.ts",
+    "link-index.ts",
+    "search-cache.ts",
+    "typesafe-search.ts",
     "exporters.ts",
     "session-store.ts",
     "sidebar.ts",
@@ -52,6 +58,9 @@
     "README.md",
     "LICENSE"
   ],
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.6.0"
+  },
   "devDependencies": {
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"

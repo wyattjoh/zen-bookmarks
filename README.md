@@ -8,7 +8,10 @@ Zen stores this sidebar state in `zen-sessions.jsonlz4` inside the browser profi
 
 ## Features
 
-- Read-only status, list, verify, and export commands work while Zen is open
+- Read-only status, list, verify, export, and relevance-search commands work while Zen is open
+- Cached BM25 retrieval and TypeSafe reranking across pinned sidebar bookmarks
+- Persistent page metadata, link classifications, and relevance scores in SQLite
+- OS-native TypeSafe credential storage through Bun Secrets
 - Full CRUD for pinned sidebar bookmarks, folders, and workspaces
 - JSON output with stable Zen IDs for scripting and unambiguous targeting
 - Interactive Zen lifecycle management for writes on macOS
@@ -16,12 +19,12 @@ Zen stores this sidebar state in `zen-sessions.jsonlz4` inside the browser profi
 - Optimistic concurrency check, structural validation, durable temporary write, and atomic rename
 - JSON, YAML, and Netscape HTML exports
 - Netscape HTML import that reuses existing tabs by pinned URL
-- Zero runtime dependencies; Bun is the only runtime
 
 ## Requirements
 
-- [Bun](https://bun.sh) 1.0 or newer
+- [Bun](https://bun.sh) 1.3 or newer
 - Zen Browser on macOS
+- A [TypeSafe](https://typesafe.ai) API key for relevance search
 
 Profile discovery currently scans `~/Library/Application Support/zen/Profiles`. Use `--sessions <path>` for an explicit session file or `--profile <substring>` to select among multiple profiles.
 
@@ -39,7 +42,7 @@ You can also run the source directly:
 bun zen-bookmarks.ts --help
 ```
 
-Runtime commands have no package dependencies. Contributors should run `bun install` for TypeScript and test declarations.
+Run `bun install` to install the TypeSafe SDK and development dependencies.
 
 ## Safety model
 
@@ -50,6 +53,8 @@ zen-bookmarks status
 zen-bookmarks list
 zen-bookmarks verify
 zen-bookmarks export
+zen-bookmarks index
+zen-bookmarks search "TypeScript references"
 ```
 
 Write commands follow this sequence:
@@ -77,6 +82,45 @@ zen-bookmarks export --out ./exports
 ```
 
 Human-readable lists include workspace, folder, and bookmark IDs. Use those IDs for reliable mutations when names or URLs are duplicated.
+
+## AI relevance search
+
+Store a TypeSafe API key in the operating system credential store, then search
+pinned sidebar bookmarks with natural language:
+
+```bash
+zen-bookmarks login
+zen-bookmarks auth status
+
+# Optional: prewarm every missing link and cached TypeSafe classification
+zen-bookmarks index
+
+zen-bookmarks search "documentation for browser extension authentication"
+zen-bookmarks search "recipes I saved for dinner" --limit 5
+zen-bookmarks search "loosely related developer tools" --min-relevance 0.25
+zen-bookmarks search "TypeScript references" --json
+
+zen-bookmarks auth delete
+```
+
+`login` prompts without echoing the key. It also accepts `--api-key <key>` for
+automation, but the argument may be retained in shell history or exposed to process
+inspection. Credentials are stored through Bun Secrets in macOS Keychain, Linux
+Secret Service, or Windows Credential Manager; they are never read from environment
+variables.
+
+The indexer caches bounded public-page metadata and text plus reusable TypeSafe
+classifications in the platform user-cache directory. Classification questions for one
+link are batched into one request. It skips local, private, likely authenticated, and
+credential-bearing URLs; those bookmarks remain searchable from their Zen metadata.
+Existing entries remain cached until `zen-bookmarks index --refresh` is run.
+
+Search lazily indexes missing links, uses local BM25 retrieval to select up to 30
+candidates, and asks TypeSafe one independent Noul relevance question per candidate.
+The CLI caches each judgment by normalized query, bookmark-content hash, model, and
+question version, so repeating an unchanged search makes no TypeSafe requests. Results
+below 0.5 relevance are hidden by default; `--min-relevance` changes that cutoff. Use
+`--cache <path>` to override the default SQLite location.
 
 ## Bookmark CRUD
 
@@ -166,8 +210,12 @@ Import rebuilds the selected workspace's pinned tree. Existing pins are reused b
 
 - `--sessions <path>`: use an explicit `zen-sessions.jsonlz4`
 - `--profile <substring>`: select a profile directory
+- `--cache <path>`: override the persistent search-cache path
 - `--dry-run`: validate without writing or closing Zen
 - `--json`: machine-readable output where supported
+- `--limit <count>`: maximum number of relevance-search results (default: 10)
+- `--min-relevance <0-1>`: relevance cutoff for search results (default: 0.5)
+- `--refresh`: replace cached link content and classifications during `index`
 - `--yes`: accept quit/reopen prompts
 - `--reopen`: always reopen a previously running Zen
 - `--no-reopen`: do not reopen Zen

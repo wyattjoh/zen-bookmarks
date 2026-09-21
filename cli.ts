@@ -1,6 +1,21 @@
+import { secrets } from "bun";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  deleteTypeSafeApiKey,
+  getTypeSafeApiKey,
+  setTypeSafeApiKey,
+  type SecretStore,
+} from "./credential-store.ts";
+import { sidebarBookmarkCandidates } from "./bookmark-candidates.ts";
 import { writeExports } from "./exporters.ts";
+import {
+  createTypeSafeLinkClassifier,
+  fetchPublicLinkContent,
+  indexBookmarkLinks,
+  type LinkClassifier,
+  type LinkContentLoader,
+} from "./link-index.ts";
 import {
   addBookmark,
   addFolder,
@@ -24,11 +39,21 @@ import {
   type ZenSession,
 } from "./sidebar.ts";
 import {
+  defaultSearchCachePath,
+  openSearchCache,
+} from "./search-cache.ts";
+import {
   loadSession,
   resolveSessionPath,
   verifySession,
   writeSession,
 } from "./session-store.ts";
+import {
+  createTypeSafeRelevanceJudge,
+  searchSidebarBookmarks,
+  type BookmarkSearchResult,
+  type RelevanceJudge,
+} from "./typesafe-search.ts";
 import {
   finishWriteLifecycle,
   isZenRunning,
@@ -50,6 +75,25 @@ type ParsedArguments = {
  */
 type Mutation = (session: ZenSession) => string;
 
+/**
+ * Replaceable integrations used by the CLI.
+ */
+export type CliDependencies = {
+  secretStore: SecretStore;
+  createRelevanceJudge: (apiKey: string) => RelevanceJudge;
+  createLinkClassifier: (apiKey: string) => LinkClassifier;
+  loadLinkContent: LinkContentLoader;
+  readCredential: () => Promise<string>;
+};
+
+const DEFAULT_CLI_DEPENDENCIES: CliDependencies = {
+  secretStore: secrets,
+  createRelevanceJudge: createTypeSafeRelevanceJudge,
+  createLinkClassifier: createTypeSafeLinkClassifier,
+  loadLinkContent: fetchPublicLinkContent,
+  readCredential: readHiddenCredential,
+};
+
 const BOOLEAN_FLAGS = new Set([
   "all",
   "apply",
@@ -58,6 +102,7 @@ const BOOLEAN_FLAGS = new Set([
   "json",
   "no-reopen",
   "recursive",
+  "refresh",
   "reopen",
   "verbose",
   "yes",
@@ -70,7 +115,13 @@ Usage:
   zen-bookmarks list [--json] [--verbose] [options]
   zen-bookmarks verify [options]
   zen-bookmarks export [--out <directory>] [options]
+  zen-bookmarks index [--refresh] [--json] [options]
+  zen-bookmarks search <query> [--limit <count>] [--min-relevance <0-1>] [--json] [options]
   zen-bookmarks import-html --file <path> [--workspace <name-or-id>] [options]
+
+  zen-bookmarks login [--api-key <key>]
+  zen-bookmarks auth status
+  zen-bookmarks auth delete
 
   zen-bookmarks bookmark add --url <url> [--title <title>] [destination]
   zen-bookmarks bookmark update --id <id> [--title <title>] [--url <new-url>]
@@ -96,14 +147,57 @@ Destination:
 Global options:
   --sessions <path>          Explicit zen-sessions.jsonlz4 path
   --profile <substring>      Select a profile directory
+  --cache <path>             Override the persistent search-cache path
+  --refresh                  Replace cached link data during index
   --dry-run                  Validate and summarize without writing or closing Zen
   --json                     Emit machine-readable output where supported
+  --min-relevance <0-1>      Search cutoff (default: 0.5)
   --yes                      Accept lifecycle prompts (reopens Zen if it was running)
   --reopen | --no-reopen     Control whether a previously running Zen is reopened
 
 Read commands work while Zen is open. Write commands prompt to quit Zen gracefully,
 write a timestamped backup and atomically replace the session, then offer to reopen Zen.
+TypeSafe credentials are stored in the operating system credential store through Bun.
 `;
+
+async function readHiddenCredential(): Promise<string> {
+  if (!process.stdin.isTTY) return (await Bun.stdin.text()).trim();
+
+  process.stdout.write("TypeSafe API key: ");
+  process.stdin.setEncoding("utf8");
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+
+  return new Promise((resolveInput, rejectInput) => {
+    let value = "";
+    const finish = (error: Error | undefined): void => {
+      process.stdin.off("data", onData);
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdout.write("\n");
+      if (error) rejectInput(error);
+      else resolveInput(value.trim());
+    };
+    const onData = (chunk: string | Buffer): void => {
+      for (const character of String(chunk)) {
+        if (character === "\u0003") {
+          finish(new Error("Credential entry cancelled"));
+          return;
+        }
+        if (character === "\r" || character === "\n" || character === "\u0004") {
+          finish(undefined);
+          return;
+        }
+        if (character === "\u007f" || character === "\b") {
+          value = value.slice(0, -1);
+          continue;
+        }
+        if (character >= " ") value += character;
+      }
+    };
+    process.stdin.on("data", onData);
+  });
+}
 
 function parseArguments(argv: string[]): ParsedArguments {
   const positionals: string[] = [];
@@ -280,6 +374,79 @@ function printTree(tree: SidebarTree, verbose: boolean): void {
   console.log("");
 }
 
+async function runLoginCommand(
+  args: ParsedArguments,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const apiKey = args.values.get("api-key") ?? (await dependencies.readCredential());
+  await setTypeSafeApiKey(apiKey, dependencies.secretStore);
+  console.log("Stored TypeSafe API key in the operating system credential store.");
+  return 0;
+}
+
+async function runAuthCommand(
+  args: ParsedArguments,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const [, action] = args.positionals;
+  if (action === "status") {
+    const apiKey = await getTypeSafeApiKey(dependencies.secretStore);
+    console.log(`TypeSafe API key: ${apiKey ? "configured" : "not configured"}`);
+    return apiKey ? 0 : 1;
+  }
+  if (action === "delete") {
+    const deleted = await deleteTypeSafeApiKey(dependencies.secretStore);
+    console.log(
+      deleted ? "Deleted the stored TypeSafe API key." : "No TypeSafe API key was stored.",
+    );
+    return 0;
+  }
+  throw new Error("auth command requires status or delete");
+}
+
+function parseSearchLimit(args: ParsedArguments): number {
+  const rawLimit = args.values.get("limit");
+  if (!rawLimit) return 10;
+  const limit = Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error("--limit must be a positive integer");
+  }
+  return limit;
+}
+
+async function requireTypeSafeApiKey(dependencies: CliDependencies): Promise<string> {
+  const apiKey = await getTypeSafeApiKey(dependencies.secretStore);
+  if (!apiKey) throw new Error("No TypeSafe API key stored; run `zen-bookmarks login`");
+  return apiKey;
+}
+
+function searchCachePath(args: ParsedArguments): string {
+  return args.values.get("cache") ?? defaultSearchCachePath();
+}
+
+function parseMinimumRelevance(args: ParsedArguments): number {
+  const rawMinimum = args.values.get("min-relevance");
+  if (!rawMinimum) return 0.5;
+  const minimum = Number(rawMinimum);
+  if (!Number.isFinite(minimum) || minimum < 0 || minimum > 1) {
+    throw new Error("--min-relevance must be between 0 and 1");
+  }
+  return minimum;
+}
+
+function printSearchResults(results: BookmarkSearchResult[]): void {
+  if (results.length === 0) {
+    console.log("No bookmarks met the relevance threshold.");
+    return;
+  }
+  for (const result of results) {
+    const location = [result.workspaceName, ...result.folderPath].join(" / ");
+    console.log(`${result.relevance.toFixed(3)}  ${result.title} (${result.id})`);
+    console.log(`       ${location}`);
+    console.log(`       ${result.url}`);
+  }
+}
+
 function lifecycleOptions(args: ParsedArguments): ZenLifecycleOptions {
   let reopen: boolean | undefined;
   if (args.switches.has("reopen")) reopen = true;
@@ -346,15 +513,75 @@ async function runMutation(
  * @param argv - Command-line arguments after the executable name
  * @returns Process exit code
  */
-export async function runCli(argv: string[]): Promise<number> {
+export async function runCli(
+  argv: string[],
+  dependencies: CliDependencies = DEFAULT_CLI_DEPENDENCIES,
+): Promise<number> {
   const args = parseArguments(argv);
   if (args.switches.has("help") || args.positionals.length === 0) {
     console.log(HELP);
     return 0;
   }
 
-  const path = resolveSessionPath(args.values.get("sessions"), args.values.get("profile"));
   const [command] = args.positionals;
+  if (command === "login") return runLoginCommand(args, dependencies);
+  if (command === "auth") return runAuthCommand(args, dependencies);
+
+  const path = resolveSessionPath(args.values.get("sessions"), args.values.get("profile"));
+  if (command === "index") {
+    const apiKey = await requireTypeSafeApiKey(dependencies);
+    const tree = buildSidebarTree(loadSession(path).session);
+    const cachePath = searchCachePath(args);
+    const cache = openSearchCache(cachePath);
+    try {
+      const result = await indexBookmarkLinks(
+        sidebarBookmarkCandidates(tree),
+        cache,
+        dependencies.createLinkClassifier(apiKey),
+        dependencies.loadLinkContent,
+        args.switches.has("refresh"),
+      );
+      if (args.switches.has("json")) console.log(JSON.stringify({ cachePath, ...result }));
+      else {
+        console.log(`Search cache: ${cachePath}`);
+        console.log(`Indexed ${result.indexed}, reused ${result.cached}, total ${result.total}`);
+      }
+    } finally {
+      cache.close();
+    }
+    return 0;
+  }
+  if (command === "search") {
+    const query = args.positionals.slice(1).join(" ").trim();
+    if (!query) throw new Error("search requires a query");
+    const apiKey = await requireTypeSafeApiKey(dependencies);
+    const tree = buildSidebarTree(loadSession(path).session);
+    const cache = openSearchCache(searchCachePath(args));
+    try {
+      const results = await searchSidebarBookmarks(
+        tree,
+        query,
+        {
+          cache,
+          classifier: dependencies.createLinkClassifier(apiKey),
+          judge: dependencies.createRelevanceJudge(apiKey),
+          loader: dependencies.loadLinkContent,
+        },
+        {
+          limit: parseSearchLimit(args),
+          minimumRelevance: parseMinimumRelevance(args),
+          shortlistSize: 30,
+          indexConcurrency: 4,
+          rerankConcurrency: 8,
+        },
+      );
+      if (args.switches.has("json")) console.log(JSON.stringify(results, null, 2));
+      else printSearchResults(results);
+    } finally {
+      cache.close();
+    }
+    return 0;
+  }
   if (command === "status") {
     const loaded = loadSession(path);
     const status = {
