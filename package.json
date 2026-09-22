@@ -1,6 +1,6 @@
 {
   "name": "@wyattjoh/zen-bookmarks",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "packageManager": "bun@1.4.2",
   "description": "Search pinned Zen sidebar bookmarks and safely manage Zen workspaces from one command-line interface.",
   "type": "module",
