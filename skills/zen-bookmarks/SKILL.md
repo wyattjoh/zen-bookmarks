@@ -1,13 +1,13 @@
 ---
 name: zen-bookmarks
-description: Operates the zen-bookmarks CLI and MCP server to search and browse saved or sidebar bookmarks and manage Zen Browser's sidebar folders and workspaces. Use when asked to "find relevant Zen bookmarks", "list Zen bookmarks", "browse Zen bookmarks", "manage Zen sidebar pins", "add or move a Zen bookmark", "manage Zen folders or workspaces", "import bookmarks into Zen", "export Zen bookmarks", or interact with `zen-bookmarks`, its MCP tools, `places.sqlite`, `zen-sessions.jsonlz4`, or Zen profile bookmark data.
+description: Operates the zen-bookmarks CLI and MCP server to search and browse pinned sidebar bookmarks and manage Zen Browser's sidebar folders and workspaces. Use when asked to "find relevant Zen bookmarks", "list Zen bookmarks", "browse Zen bookmarks", "manage Zen sidebar pins", "add or move a Zen bookmark", "manage Zen folders or workspaces", "import bookmarks into Zen", "export Zen bookmarks", or interact with `zen-bookmarks`, its MCP tools, `zen-sessions.jsonlz4`, or Zen profile bookmark data.
 license: MIT
 compatibility: Requires macOS, Zen Browser, and Bun 1.3 or newer. The `zen-bookmarks` executable must be linked or run from this repository with `bun src/zen-bookmarks.ts`.
 ---
 
 # Zen Bookmarks
 
-Use the unified `zen-bookmarks` CLI or its MCP server to browse Zen bookmarks and modify the browser's sidebar. “Bookmarks” collectively means saved bookmarks from `places.sqlite` and pinned sidebar links/tabs from `zen-sessions.jsonlz4`. Saved bookmarks are browse-only; mutation commands manage sidebar bookmarks, folders, and workspaces.
+Use the unified `zen-bookmarks` CLI or its MCP server to search, browse, and modify pinned sidebar links/tabs from `zen-sessions.jsonlz4`. Mutation commands manage sidebar bookmarks, folders, and workspaces. Firefox-style saved bookmarks from `places.sqlite` are not exposed by the current CLI, TUI, or MCP interfaces.
 
 ## Route the request
 
@@ -15,9 +15,9 @@ Choose one route before calling tools:
 
 - **Relevant/helpful sidebar bookmarks via MCP:** use the MCP `search` fast path below. Do not call `status`, `auth_status`, `index`, or `list` first.
 - **Explicitly exhaustive sidebar browsing or exact ID lookup:** call `list` once and filter its `structuredContent` inside the same client-side script. Do not repeatedly re-list or emit the full tree.
-- **Saved bookmarks from `places.sqlite`:** explain that MCP `search` and `list` cover only pinned sidebar bookmarks; use the interactive browser when saved-bookmark coverage is required.
+- **Saved bookmarks from `places.sqlite`:** explain that the current CLI, TUI, and MCP interfaces cover only pinned sidebar bookmarks; do not claim saved-bookmark coverage.
 - **Mutation:** establish the exact profile/session, inspect stable IDs, and follow the dry-run workflow.
-- **Interactive browsing:** launch the TUI only when the user requests an interactive terminal browser or needs saved bookmarks.
+- **Interactive search:** launch the TUI when the user requests a query-first terminal search with rich, keyboard-selectable results.
 
 For a relevance request, keep the normal budget to one project-context tool turn and one batched MCP tool turn after loading this skill. Exceed that budget only for a concrete tool error, ambiguous profile, or an explicit request for exhaustive coverage.
 
@@ -54,7 +54,7 @@ When the user asks which bookmarks might help with a project or topic and MCP is
 5. Deduplicate results by URL, preserve at least one strong result from each successful intent before filling remaining slots by relevance, and report `title`, `url`, `workspaceName`, `folderPath`, `relevance`, and cached Firecrawl `summary` when available.
 6. Stop once 5–8 useful, diverse results have enough context to answer. Search already returns workspace and folder locations, so do not call `list` to rediscover them.
 
-`search` and `list` cover pinned sidebar bookmarks only. If the user explicitly requires saved bookmarks from `places.sqlite`, explain that limitation and use the interactive browser rather than claiming MCP coverage.
+`search` and `list` cover pinned sidebar bookmarks only. If the user explicitly requires saved bookmarks from `places.sqlite`, explain that the current CLI, TUI, and MCP interfaces do not provide that coverage.
 
 A single Pi `mcpScript` can perform discovery and all searches without intermediate schema-probing calls:
 
@@ -93,9 +93,11 @@ return emit([...firstPerQuery, ...remaining].slice(0, 8));
 
 Do not call `auth_status` before every search; call it only when the user asks or when `search` reports a TypeSafe or Firecrawl credential problem. Search uses TypeSafe to rank candidates, then requests and caches general Firecrawl summaries for every returned public result above the relevance threshold. Use `list` instead of `search` only for exhaustive browsing, exact ID resolution, mutation preparation, or as a fallback when relevance search is unavailable.
 
-## Browse interactively
+## Search interactively
 
-Run `zen-bookmarks` without arguments in an interactive terminal to open the OpenTUI bookmark browser. It shows saved and sidebar bookmarks in folder trees (including empty folders) that start fully collapsed, with focused workspace, persistent search, bookmark-list, and detail regions. Bookmark details include a cached Firecrawl summary after that page has appeared in returned search results above the relevance threshold. `Tab` cycles forward through Zen workspaces such as Personal and Work, while `Shift-Tab` cycles backward; saved bookmarks remain visible in every workspace view. `/` focuses fuzzy search. Arrow keys move between regions, `j`/`k` navigate bookmarks or scroll details, and Page Up/Page Down moves by a page. Right opens details or expands a collapsed folder; Left returns to bookmarks or collapses a folder; Enter toggles folders. Mouse clicks transfer focus. Lowercase `r` re-scrapes and reclassifies the selected URL and requires a stored TypeSafe API key. Uppercase `R` reloads saved and sidebar bookmarks from the current Zen profile's on-disk databases. In non-TTY automation, an argument-free invocation prints help instead.
+Run `zen-bookmarks` without arguments in an interactive terminal to open the Pi-style OpenTUI search interface. Type a natural-language query into the bottom composer and press `Enter`. The TUI performs the same search as the CLI: it lazily indexes missing sidebar links, retrieves a local BM25 shortlist, applies TypeSafe relevance scoring with the default 0.5 cutoff, returns up to ten results, and enriches public results with cached Firecrawl summaries. Both stored credentials are required.
+
+After a search, the first rich result card is selected. Use Up/Down or `j`/`k` to navigate, Page Up/Page Down to jump, and `/`, `Enter`, or Escape to return to the composer. Result cards show relevance, workspace/folder location, URL, current URL when different, and summary. Mouse clicks select cards. Press `q` while navigating results or `Ctrl+C` anywhere to quit. The TUI searches pinned sidebar bookmarks only. In non-TTY automation, an argument-free invocation prints help instead.
 
 ## Establish the session
 

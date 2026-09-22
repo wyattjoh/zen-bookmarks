@@ -135,7 +135,9 @@ describe("unified CLI", () => {
       stderr: "pipe",
     });
     expect(result.exitCode).toBe(0);
-    expect(result.stdout.toString()).toContain("Open the interactive bookmark browser");
+    expect(result.stdout.toString()).toContain(
+      "Open interactive semantic bookmark search",
+    );
   });
 
   test("stores credentials and searches with injected TypeSafe judgments", async () => {

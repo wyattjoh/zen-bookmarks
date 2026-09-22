@@ -259,7 +259,7 @@ const BOOLEAN_FLAGS = new Set([
 const HELP = `zen-bookmarks — browse and manage Zen bookmarks
 
 Usage:
-  zen-bookmarks                 Open the interactive bookmark browser (TTY only)
+  zen-bookmarks                 Open interactive semantic bookmark search (TTY only)
   zen-bookmarks mcp             Serve typed bookmark tools over MCP stdio
   zen-bookmarks status [options]
   zen-bookmarks list [--json] [--verbose] [options]

@@ -2,7 +2,7 @@
   "name": "@wyattjoh/zen-bookmarks",
   "version": "0.2.0",
   "packageManager": "bun@1.4.2",
-  "description": "Browse saved and sidebar bookmarks and safely manage Zen workspaces from one command-line interface.",
+  "description": "Search pinned Zen sidebar bookmarks and safely manage Zen workspaces from one command-line interface.",
   "type": "module",
   "bin": {
     "zen-bookmarks": "./src/zen-bookmarks.ts",

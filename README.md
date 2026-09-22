@@ -1,14 +1,14 @@
 # zen-bookmarks
 
-Browse all [Zen browser](https://zen-browser.app) bookmarks—saved bookmarks plus pinned sidebar links/tabs—and manage sidebar folders and workspaces from one command-line interface. This project refers to all of those URL-bearing records collectively as **bookmarks**.
+Search [Zen browser](https://zen-browser.app) pinned sidebar links/tabs and manage sidebar folders and workspaces from one command-line interface. This project refers to those URL-bearing records collectively as **bookmarks**.
 
-Run `zen-bookmarks` without arguments in a terminal to open the interactive bookmark browser. Saved bookmarks are read from `places.sqlite`; sidebar bookmarks and workspace state come from `zen-sessions.jsonlz4`. Both sources are read-only while browsing. Sidebar mutations use the existing safe close, backup, validation, atomic-write, and reopen lifecycle.
+Run `zen-bookmarks` without arguments in a terminal to open the interactive semantic-search interface. It reads sidebar bookmarks and workspace state from `zen-sessions.jsonlz4`, uses the same BM25, TypeSafe, Firecrawl, and SQLite-cache pipeline as `zen-bookmarks search`, and never modifies Zen while searching. Sidebar mutations use the existing safe close, backup, validation, atomic-write, and reopen lifecycle.
 
 ## Features
 
-- OpenTUI React browser for saved and sidebar bookmarks when invoked without arguments
-- Grouped fuzzy filtering with cached page metadata and TypeSafe classifications
-- On-demand re-scraping and reclassification of the selected bookmark
+- Pi-style OpenTUI semantic search when invoked without arguments
+- Enter-to-search composer backed by the same retrieval pipeline as the CLI
+- Rich, keyboard-selectable result cards with relevance, location, URL, and summary
 - Read-only status, list, verify, export, and relevance-search commands work while Zen is open
 - Cached BM25 retrieval and TypeSafe reranking across sidebar bookmarks
 - Firecrawl summaries for every returned public page above the relevance threshold
@@ -78,13 +78,13 @@ A typical MCP client configuration is:
 
 The server exposes `status`, `auth_status`, `list`, `verify`, `export`, `index`, `search`, and `import_html`, plus `bookmark_*`, `folder_*`, and `workspace_*` CRUD tools. Every tool advertises a human-readable title, behavioral annotations, and typed inputs instead of raw CLI arguments. `status`, `list`, and `search` also advertise output schemas for their `structuredContent`. Server instructions route relevance requests to `search`, bound project discovery to at most four focused calls with explicit stopping rules, reserve the potentially large `list` result for exhaustive sidebar inspection and stable-ID lookup, and explain that search results already contain workspace and folder locations. Each search returns at most eight results. Use `sessions` for an exact `zen-sessions.jsonlz4` path or `profile` for a unique profile substring.
 
-MCP tools operate on pinned Zen sidebar bookmarks. Firefox-style saved bookmarks from `places.sqlite` are available in the interactive browser, not through `search` or `list`.
+MCP tools operate on pinned Zen sidebar bookmarks. Firefox-style saved bookmarks from `places.sqlite` are not exposed by the current CLI, TUI, or MCP search/list interfaces.
 
 Mutation tools default to `apply: false`, which runs the existing `--dry-run` path without closing Zen or writing files. Set `apply: true` only after reviewing that result; the server then uses the CLI's non-interactive `--yes` lifecycle, including validation, backup, atomic replacement, and reopening Zen when appropriate. The optional `reopen` boolean maps to `--reopen` or `--no-reopen`.
 
 Credential entry and deletion are intentionally not exposed over MCP because tool arguments and calls may be logged by clients. Run `zen-bookmarks login` once to configure TypeSafe and Firecrawl; existing keys are preserved unless you confirm that they should be replaced. `search` requires both stored credentials, while `index` requires only TypeSafe. The interactive TUI also remains a terminal-only interface.
 
-## Interactive browser
+## Interactive search
 
 Launch the TUI from an interactive terminal:
 
@@ -92,9 +92,11 @@ Launch the TUI from an interactive terminal:
 zen-bookmarks
 ```
 
-The left pane presents saved bookmarks and sidebar bookmarks as collapsible folder trees grouped by source and workspace, including empty folders. All folders start collapsed, and folder depth is the only source of row indentation. Each bookmark uses a title line followed immediately by its muted URL. Press `Tab` to cycle through Zen workspaces such as Personal and Work (`Shift-Tab` cycles backward); saved bookmarks remain visible in every workspace view. A persistent search field fuzzy-filters titles, URLs, folders, locations, and cached metadata; press `/` to focus it. The focused border identifies whether keyboard input targets workspaces, search, bookmarks, or details. Arrow keys move between regions, `j`/`k` navigate bookmarks or scroll details, and Page Up/Page Down moves by a page. Right opens details for a bookmark or expands a collapsed folder; Left returns from details or collapses a folder; Enter toggles folders. Mouse clicks transfer focus, and dragging still selects text for copying without leaving a one-character highlight after ordinary clicks. The detail pane shows cached page metadata, Firecrawl summary when available, and a readable topic-confidence table while hiding internal hashes and raw classification JSON. Press lowercase `r` to fetch the selected page again and rerun its TypeSafe classification, uppercase `R` to reload both bookmark databases from Zen, or `q` to quit.
+The interface follows Pi's query-and-results shape: a rounded composer stays at the bottom while the submitted query and rich result cards render above it. Enter a natural-language query and press `Enter`. The TUI runs the same sidebar search as `zen-bookmarks search`, including lazy indexing, local BM25 shortlisting, TypeSafe relevance scoring, the default 0.5 relevance threshold, a ten-result limit, and cached Firecrawl summaries.
 
-Re-scraping requires the TypeSafe API key configured by `zen-bookmarks login`. Saved bookmarks are browse-only; mutation commands continue to target sidebar bookmarks. If Zen holds an exclusive lock on `places.sqlite`, the TUI reads a temporary snapshot of both the main database and its WAL so recent saved-bookmark changes remain visible without interfering with the browser.
+After results load, focus moves to the first card. Use Up/Down or `j`/`k` to move between cards and Page Up/Page Down to jump farther; the scrollbox keeps the selected result visible. Each card shows its relevance, workspace and folder path, URL, current URL when different, and summary. Press `/`, `Enter`, or Escape to return to the composer for another query, click a card to select it, or press `q` while navigating results to quit. `Ctrl+C` exits from either region.
+
+Search requires both API keys configured by `zen-bookmarks login`. The TUI searches pinned sidebar bookmarks, matching the CLI search scope; Firefox-style saved bookmarks from `places.sqlite` are not included.
 
 When standard input or output is not a TTY, invoking the command without arguments prints CLI help instead of opening the TUI.
 
@@ -167,7 +169,7 @@ process inspection. Credentials are stored through Bun Secrets in macOS Keychain
 Linux Secret Service, or Windows Credential Manager; they are never read from
 environment variables.
 
-The indexer and TUI cache bounded public-page metadata and text plus reusable TypeSafe
+The indexer, CLI search, and TUI cache bounded public-page metadata and text plus reusable TypeSafe
 classifications in the platform user-cache directory. Classification questions for one
 link are batched into one request. They skip local, private, likely authenticated, and
 credential-bearing URLs; those bookmarks remain visible from their Zen metadata.
@@ -179,7 +181,7 @@ After applying the relevance cutoff, sorting, and result limit, it calls Firecra
 with the `summary` format for every returned public page. Calls use bounded concurrency.
 Summaries are general rather than query-specific and are cached against the locally
 indexed page-content hash, so unchanged pages are not sent to Firecrawl again. The CLI and MCP search responses include
-the summaries, and the TUI displays cached summaries in bookmark details.
+the summaries, and the TUI displays cached summaries directly in its result cards.
 
 The CLI caches each relevance judgment by normalized query, bookmark-content hash, model,
 and question version, so repeating an unchanged search makes no TypeSafe requests.

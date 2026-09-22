@@ -76,7 +76,7 @@ const serverInstructions = [
   "Search results already include workspaceName, folderPath, and cached Firecrawl summaries for returned public pages, so do not call status or list merely to locate a result.",
   "Do not call index before search because search lazily populates its cache.",
   "Use list only for exhaustive sidebar browsing, exact stable-ID resolution, mutation preparation, or fallback after search fails.",
-  "The MCP tools cover pinned Zen sidebar bookmarks; Firefox-style saved bookmarks from places.sqlite are available only through the interactive browser.",
+  "The CLI, TUI, and MCP tools cover pinned Zen sidebar bookmarks; Firefox-style saved bookmarks from places.sqlite are not exposed.",
   "Mutations default to a dry run. Show that preview and obtain approval before calling the same tool with apply true.",
 ].join(" ");
 
