@@ -1,41 +1,48 @@
 import { describe, expect, test } from "bun:test";
 import {
+  deleteFirecrawlApiKey,
   deleteTypeSafeApiKey,
+  getFirecrawlApiKey,
   getTypeSafeApiKey,
+  setFirecrawlApiKey,
   setTypeSafeApiKey,
   type SecretStore,
 } from "./credential-store.ts";
 
 function memoryStore(): SecretStore {
-  let value: string | null = null;
+  const values = new Map<string, string>();
   return {
-    async get() {
-      return value;
+    async get(options) {
+      return values.get(options.name) ?? null;
     },
     async set(options) {
-      value = options.value;
+      values.set(options.name, options.value);
     },
-    async delete() {
-      const deleted = value !== null;
-      value = null;
-      return deleted;
+    async delete(options) {
+      return values.delete(options.name);
     },
   };
 }
 
-describe("TypeSafe credential store", () => {
-  test("stores, retrieves, and deletes an API key", async () => {
+describe("credential store", () => {
+  test("stores providers independently", async () => {
     const store = memoryStore();
 
-    expect(await getTypeSafeApiKey(store)).toBeNull();
-    await setTypeSafeApiKey("  secret-key  ", store);
-    expect(await getTypeSafeApiKey(store)).toBe("secret-key");
+    await setTypeSafeApiKey("  typesafe-key  ", store);
+    await setFirecrawlApiKey("  firecrawl-key  ", store);
+    expect(await getTypeSafeApiKey(store)).toBe("typesafe-key");
+    expect(await getFirecrawlApiKey(store)).toBe("firecrawl-key");
     expect(await deleteTypeSafeApiKey(store)).toBe(true);
     expect(await getTypeSafeApiKey(store)).toBeNull();
+    expect(await getFirecrawlApiKey(store)).toBe("firecrawl-key");
+    expect(await deleteFirecrawlApiKey(store)).toBe(true);
   });
 
   test("rejects empty API keys", async () => {
     await expect(setTypeSafeApiKey("   ", memoryStore())).rejects.toThrow(
+      "cannot be empty",
+    );
+    await expect(setFirecrawlApiKey("   ", memoryStore())).rejects.toThrow(
       "cannot be empty",
     );
   });

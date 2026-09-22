@@ -372,6 +372,7 @@ function searchableBookmarkText(bookmark: TuiBookmark): string {
     ...bookmark.folderPath,
     bookmark.cached?.pageTitle ?? "",
     bookmark.cached?.description ?? "",
+    bookmark.cached?.summary ?? "",
     classification?.resourceKind ?? "",
     classification?.purpose ?? "",
     ...(classification?.topics.map((topic) => topic.name) ?? []),

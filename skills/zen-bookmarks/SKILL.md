@@ -41,7 +41,7 @@ Use the chosen form consistently. Do not run `bun link` or install anything unle
 
 Run `zen-bookmarks mcp` to expose typed stdio MCP tools for status, list, verification, export, indexing, search, HTML import, and bookmark/folder/workspace CRUD. Mutation tools use `apply: false` by default, which performs the same safe dry run as `--dry-run`; set `apply: true` only after showing the dry-run result and receiving confirmation. Use the tool's `reopen` boolean to control the Zen lifecycle when applying.
 
-The MCP server intentionally excludes credential entry and deletion because MCP calls may be logged. Use `zen-bookmarks login` or `zen-bookmarks auth delete` directly in a trusted terminal.
+The MCP server intentionally excludes credential entry and deletion because MCP calls may be logged. Use `zen-bookmarks login` once in a trusted terminal to configure both TypeSafe and Firecrawl; existing keys are kept unless replacement is confirmed. Provider-specific `zen-bookmarks auth delete` commands remain available. Search requires both credentials.
 
 ### Find relevant bookmarks efficiently
 
@@ -51,7 +51,7 @@ When the user asks which bookmarks might help with a project or topic and MCP is
 2. Identify four distinct intents and send one focused natural-language query per intent, such as `terminal UI testing` or `agent-friendly CLI design`. Do not combine unrelated technologies into one keyword-heavy query.
 3. Batch every query into one MCP client round trip. For exploratory discovery, use a modest `limit` such as 5–8 and `minRelevance: 0.15`; shortlist at most two results per intent before combining them.
 4. Unwrap the MCP client response before ranking. In Pi's `mcpScript`, `tools.call()` returns an `{ ok, data }` envelope; the CLI's structured search array is `response.data.structuredContent.result`.
-5. Deduplicate results by URL, preserve at least one strong result from each successful intent before filling remaining slots by relevance, and report `title`, `url`, `workspaceName`, `folderPath`, and `relevance` when available.
+5. Deduplicate results by URL, preserve at least one strong result from each successful intent before filling remaining slots by relevance, and report `title`, `url`, `workspaceName`, `folderPath`, `relevance`, and cached Firecrawl `summary` when available.
 6. Stop once 5–8 useful, diverse results have enough context to answer. Search already returns workspace and folder locations, so do not call `list` to rediscover them.
 
 `search` and `list` cover pinned sidebar bookmarks only. If the user explicitly requires saved bookmarks from `places.sqlite`, explain that limitation and use the interactive browser rather than claiming MCP coverage.
@@ -91,11 +91,11 @@ const remaining = unique
 return emit([...firstPerQuery, ...remaining].slice(0, 8));
 ```
 
-Do not call `auth_status` before every search; call it only when the user asks or when `search` reports a credential problem. Use `list` instead of `search` only for exhaustive browsing, exact ID resolution, mutation preparation, or as a fallback when relevance search is unavailable.
+Do not call `auth_status` before every search; call it only when the user asks or when `search` reports a TypeSafe or Firecrawl credential problem. Search uses TypeSafe to rank candidates, then requests and caches general Firecrawl summaries for every returned public result above the relevance threshold. Use `list` instead of `search` only for exhaustive browsing, exact ID resolution, mutation preparation, or as a fallback when relevance search is unavailable.
 
 ## Browse interactively
 
-Run `zen-bookmarks` without arguments in an interactive terminal to open the OpenTUI bookmark browser. It shows saved and sidebar bookmarks in folder trees (including empty folders) that start fully collapsed, with focused workspace, persistent search, bookmark-list, and detail regions. `Tab` cycles forward through Zen workspaces such as Personal and Work, while `Shift-Tab` cycles backward; saved bookmarks remain visible in every workspace view. `/` focuses fuzzy search. Arrow keys move between regions, `j`/`k` navigate bookmarks or scroll details, and Page Up/Page Down moves by a page. Right opens details or expands a collapsed folder; Left returns to bookmarks or collapses a folder; Enter toggles folders. Mouse clicks transfer focus. Lowercase `r` re-scrapes and reclassifies the selected URL and requires a stored TypeSafe API key. Uppercase `R` reloads saved and sidebar bookmarks from the current Zen profile's on-disk databases. In non-TTY automation, an argument-free invocation prints help instead.
+Run `zen-bookmarks` without arguments in an interactive terminal to open the OpenTUI bookmark browser. It shows saved and sidebar bookmarks in folder trees (including empty folders) that start fully collapsed, with focused workspace, persistent search, bookmark-list, and detail regions. Bookmark details include a cached Firecrawl summary after that page has appeared in returned search results above the relevance threshold. `Tab` cycles forward through Zen workspaces such as Personal and Work, while `Shift-Tab` cycles backward; saved bookmarks remain visible in every workspace view. `/` focuses fuzzy search. Arrow keys move between regions, `j`/`k` navigate bookmarks or scroll details, and Page Up/Page Down moves by a page. Right opens details or expands a collapsed folder; Left returns to bookmarks or collapses a folder; Enter toggles folders. Mouse clicks transfer focus. Lowercase `r` re-scrapes and reclassifies the selected URL and requires a stored TypeSafe API key. Uppercase `R` reloads saved and sidebar bookmarks from the current Zen profile's on-disk databases. In non-TTY automation, an argument-free invocation prints help instead.
 
 ## Establish the session
 
@@ -237,6 +237,7 @@ Import preserves other workspaces and reuses existing pinned tabs by URL where p
 ## Handle failures
 
 - Preserve stderr and the process exit code; do not claim success from stdout alone.
+- Add `--debug` to CLI `index` or `search` commands when diagnosing page-fetch, TypeSafe, or Firecrawl network timing and cache decisions; debug logs go to stderr without corrupting JSON stdout.
 - If profile selection is ambiguous, ask for `--profile` or an explicit `--sessions` path.
 - If a selector is ambiguous, re-list and use an ID or narrower source selectors.
 - If validation or optimistic concurrency checks fail, stop and re-read current state; never retry a stale mutation blindly.

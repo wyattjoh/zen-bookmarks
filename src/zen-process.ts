@@ -35,9 +35,21 @@ export function isZenRunning(): boolean {
   }
 }
 
-async function promptYesNo(question: string, defaultYes: boolean): Promise<boolean> {
+/**
+ * Ask an interactive yes/no question with an explicit default.
+ *
+ * @param question - Prompt text without the choice suffix
+ * @param defaultYes - Whether an empty answer means yes
+ * @param automationHint - Guidance shown when no terminal is available
+ * @returns Whether the user answered yes
+ */
+export async function promptYesNo(
+  question: string,
+  defaultYes: boolean,
+  automationHint = "pass --yes to automate it",
+): Promise<boolean> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error("Interactive confirmation requires a terminal; pass --yes to automate it");
+    throw new Error(`Interactive confirmation requires a terminal; ${automationHint}`);
   }
   const prompt = `${question} ${defaultYes ? "[Y/n]" : "[y/N]"} `;
   const readline = createInterface({ input: process.stdin, output: process.stdout });

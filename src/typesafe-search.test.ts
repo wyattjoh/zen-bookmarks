@@ -73,6 +73,7 @@ describe("TypeSafe bookmark search", () => {
     let loaderCalls = 0;
     let classifierCalls = 0;
     let judgeCalls = 0;
+    let summarizerCalls = 0;
     const dependencies = {
       cache,
       loader: async () => {
@@ -100,6 +101,14 @@ describe("TypeSafe bookmark search", () => {
           return state.bookmark.title === "TypeScript Handbook" ? 0.94 : 0.08;
         },
       },
+      summarizer: {
+        async summarize(url: string) {
+          summarizerCalls += 1;
+          expect(url).toBe("https://typescriptlang.org/docs");
+          return "The TypeScript language reference.";
+        },
+      },
+      debug: undefined,
     };
 
     try {
@@ -124,11 +133,94 @@ describe("TypeSafe bookmark search", () => {
         workspaceName: "Work",
         folderPath: ["References"],
         relevance: 0.94,
+        summary: "The TypeScript language reference.",
       });
       expect(second).toEqual(first);
       expect(loaderCalls).toBe(2);
       expect(classifierCalls).toBe(2);
       expect(judgeCalls).toBe(2);
+      expect(summarizerCalls).toBe(1);
+    } finally {
+      cache.close();
+    }
+  });
+
+  test("summarizes every returned result above the relevance threshold", async () => {
+    const cache = openSearchCache(":memory:");
+    const rankedTree: SidebarTree = {
+      workspaces: [
+        {
+          id: "workspace-1",
+          name: "Work",
+          folders: [],
+          bookmarks: [1, 2, 3, 4].map((rank) => ({
+            id: `bookmark-${rank}`,
+            title: `Reference ${rank}`,
+            url: `https://example.com/${rank}`,
+            currentUrl: undefined,
+            workspaceId: "workspace-1",
+            folderId: undefined,
+            index: rank,
+          })),
+        },
+      ],
+    };
+    const summarized: string[] = [];
+    try {
+      const results = await searchSidebarBookmarks(
+        rankedTree,
+        "reference",
+        {
+          cache,
+          loader: async (url) => ({
+            fetchStatus: "ok",
+            finalUrl: url,
+            pageTitle: "Reference",
+            description: "Reference page",
+            text: "reference",
+            error: null,
+          }),
+          classifier: {
+            model: "test-model",
+            async classify() {
+              return classification();
+            },
+          },
+          judge: {
+            model: "test-model",
+            async score(state) {
+              return 1 - Number(state.bookmark.title.at(-1)) / 10;
+            },
+          },
+          summarizer: {
+            async summarize(url) {
+              summarized.push(url);
+              return `Summary for ${url}`;
+            },
+          },
+          debug: undefined,
+        },
+        {
+          limit: 4,
+          minimumRelevance: 0,
+          shortlistSize: 4,
+          indexConcurrency: 2,
+          rerankConcurrency: 2,
+        },
+      );
+
+      expect(summarized).toEqual([
+        "https://example.com/1",
+        "https://example.com/2",
+        "https://example.com/3",
+        "https://example.com/4",
+      ]);
+      expect(results.map((result) => result.summary)).toEqual([
+        "Summary for https://example.com/1",
+        "Summary for https://example.com/2",
+        "Summary for https://example.com/3",
+        "Summary for https://example.com/4",
+      ]);
     } finally {
       cache.close();
     }
@@ -158,6 +250,12 @@ describe("TypeSafe bookmark search", () => {
                 throw new Error("unexpected judge call");
               },
             },
+            summarizer: {
+              async summarize() {
+                throw new Error("unexpected summarizer call");
+              },
+            },
+            debug: undefined,
           },
           {
             limit: 0,

@@ -2,13 +2,20 @@ import { secrets } from "bun";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  deleteFirecrawlApiKey,
   deleteTypeSafeApiKey,
+  getFirecrawlApiKey,
   getTypeSafeApiKey,
+  setFirecrawlApiKey,
   setTypeSafeApiKey,
   type SecretStore,
 } from "./credential-store.ts";
 import { sidebarBookmarkCandidates } from "./bookmark-candidates.ts";
 import { writeExports } from "./exporters.ts";
+import {
+  createFirecrawlPageSummarizer,
+  type PageSummarizer,
+} from "./firecrawl-summary.ts";
 import {
   createTypeSafeLinkClassifier,
   fetchPublicLinkContent,
@@ -16,6 +23,10 @@ import {
   type LinkClassifier,
   type LinkContentLoader,
 } from "./link-index.ts";
+import type {
+  NetworkDebugFields,
+  NetworkDebugLogger,
+} from "./network-debug.ts";
 import {
   addBookmark,
   addFolder,
@@ -58,6 +69,7 @@ import {
   finishWriteLifecycle,
   isZenRunning,
   prepareForWrite,
+  promptYesNo,
   type ZenLifecycleOptions,
 } from "./zen-process.ts";
 
@@ -75,6 +87,132 @@ type ParsedArguments = {
  */
 type Mutation = (session: ZenSession) => string;
 
+function debugUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return rawUrl.split(/[?#]/, 1)[0];
+  }
+}
+
+function stderrDebugLogger(event: string, fields: NetworkDebugFields): void {
+  const details = Object.entries(fields)
+    .map(([key, value]) => {
+      const safeValue =
+        typeof value === "string" && (key === "url" || key.endsWith("_url"))
+          ? debugUrl(value)
+          : value;
+      return `${key}=${JSON.stringify(safeValue)}`;
+    })
+    .join(" ");
+  console.error(`[debug] ${event}${details ? ` ${details}` : ""}`);
+}
+
+async function traceNetwork<T>(
+  logger: NetworkDebugLogger,
+  operation: string,
+  fields: NetworkDebugFields,
+  run: () => Promise<T>,
+  resultFields: (result: T) => NetworkDebugFields = () => ({}),
+): Promise<T> {
+  logger("network.start", { operation, ...fields });
+  const startedAt = performance.now();
+  try {
+    const result = await run();
+    logger("network.complete", {
+      operation,
+      ...fields,
+      duration_ms: Math.round(performance.now() - startedAt),
+      ...resultFields(result),
+    });
+    return result;
+  } catch (error) {
+    logger("network.error", {
+      operation,
+      ...fields,
+      duration_ms: Math.round(performance.now() - startedAt),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+function debugLinkContentLoader(
+  loader: LinkContentLoader,
+  logger: NetworkDebugLogger | undefined,
+): LinkContentLoader {
+  if (!logger) return loader;
+  return (url) =>
+    traceNetwork(
+      logger,
+      "page-fetch",
+      { url: debugUrl(url) },
+      () => loader(url),
+      (content) => ({
+        fetch_status: content.fetchStatus,
+        final_url: content.finalUrl ? debugUrl(content.finalUrl) : null,
+      }),
+    );
+}
+
+function debugLinkClassifier(
+  classifier: LinkClassifier,
+  logger: NetworkDebugLogger | undefined,
+): LinkClassifier {
+  if (!logger) return classifier;
+  return {
+    model: classifier.model,
+    classify: (state) =>
+      traceNetwork(
+        logger,
+        "typesafe-classification",
+        { model: classifier.model, url: debugUrl(state.link.url) },
+        () => classifier.classify(state),
+        (classification) => ({ response_model: classification.model }),
+      ),
+  };
+}
+
+function debugRelevanceJudge(
+  judge: RelevanceJudge,
+  logger: NetworkDebugLogger | undefined,
+): RelevanceJudge {
+  if (!logger) return judge;
+  return {
+    model: judge.model,
+    score: (state) =>
+      traceNetwork(
+        logger,
+        "typesafe-relevance",
+        { model: judge.model, url: debugUrl(state.bookmark.url) },
+        () => judge.score(state),
+        (score) => ({ score }),
+      ),
+  };
+}
+
+function debugPageSummarizer(
+  summarizer: PageSummarizer,
+  logger: NetworkDebugLogger | undefined,
+): PageSummarizer {
+  if (!logger) return summarizer;
+  return {
+    summarize: (url) =>
+      traceNetwork(
+        logger,
+        "firecrawl-summary",
+        { url: debugUrl(url) },
+        () => summarizer.summarize(url),
+        (summary) => ({ summary_length: summary.length }),
+      ),
+  };
+}
+
 /**
  * Replaceable integrations used by the CLI.
  */
@@ -82,21 +220,31 @@ export type CliDependencies = {
   secretStore: SecretStore;
   createRelevanceJudge: (apiKey: string) => RelevanceJudge;
   createLinkClassifier: (apiKey: string) => LinkClassifier;
+  createPageSummarizer: (apiKey: string) => PageSummarizer;
   loadLinkContent: LinkContentLoader;
-  readCredential: () => Promise<string>;
+  readCredential: (label: string) => Promise<string>;
+  confirmCredentialReplacement: (label: string) => Promise<boolean>;
 };
 
 const DEFAULT_CLI_DEPENDENCIES: CliDependencies = {
   secretStore: secrets,
   createRelevanceJudge: createTypeSafeRelevanceJudge,
   createLinkClassifier: createTypeSafeLinkClassifier,
+  createPageSummarizer: createFirecrawlPageSummarizer,
   loadLinkContent: fetchPublicLinkContent,
   readCredential: readHiddenCredential,
+  confirmCredentialReplacement: (label) =>
+    promptYesNo(
+      `${label} API key is already configured. Replace it?`,
+      false,
+      "provide the matching API-key flag to replace it non-interactively",
+    ),
 };
 
 const BOOLEAN_FLAGS = new Set([
   "all",
   "apply",
+  "debug",
   "dry-run",
   "help",
   "json",
@@ -121,9 +269,9 @@ Usage:
   zen-bookmarks search <query> [--limit <count>] [--min-relevance <0-1>] [--json] [options]
   zen-bookmarks import-html --file <path> [--workspace <name-or-id>] [options]
 
-  zen-bookmarks login [--api-key <key>]
-  zen-bookmarks auth status
-  zen-bookmarks auth delete
+  zen-bookmarks login [--typesafe-api-key <key>] [--firecrawl-api-key <key>]
+  zen-bookmarks auth status [typesafe|firecrawl]
+  zen-bookmarks auth delete [typesafe|firecrawl]
 
   zen-bookmarks bookmark add --url <url> [--title <title>] [destination]
   zen-bookmarks bookmark update --id <id> [--title <title>] [--url <new-url>]
@@ -152,6 +300,7 @@ Global options:
   --cache <path>             Override the persistent search-cache path
   --refresh                  Replace cached link data during index
   --dry-run                  Validate and summarize without writing or closing Zen
+  --debug                    Log network operations and timing to stderr
   --json                     Emit machine-readable output where supported
   --min-relevance <0-1>      Search cutoff (default: 0.5)
   --yes                      Accept lifecycle prompts (reopens Zen if it was running)
@@ -159,13 +308,17 @@ Global options:
 
 Read commands work while Zen is open. Write commands prompt to quit Zen gracefully,
 write a timestamped backup and atomically replace the session, then offer to reopen Zen.
-TypeSafe credentials are stored in the operating system credential store through Bun.
+TypeSafe and Firecrawl credentials are stored in the operating system credential store through Bun.
 `;
 
-async function readHiddenCredential(): Promise<string> {
-  if (!process.stdin.isTTY) return (await Bun.stdin.text()).trim();
+async function readHiddenCredential(label: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      "Non-interactive login requires API-key flags for every missing credential",
+    );
+  }
 
-  process.stdout.write("TypeSafe API key: ");
+  process.stdout.write(`${label} API key: `);
   process.stdin.setEncoding("utf8");
   process.stdin.setRawMode(true);
   process.stdin.resume();
@@ -376,13 +529,57 @@ function printTree(tree: SidebarTree, verbose: boolean): void {
   console.log("");
 }
 
+type CredentialProvider = "typesafe" | "firecrawl";
+
+function parseCredentialProvider(value: string | undefined): CredentialProvider {
+  const provider = value ?? "typesafe";
+  if (provider === "typesafe" || provider === "firecrawl") return provider;
+  throw new Error("credential provider must be typesafe or firecrawl");
+}
+
 async function runLoginCommand(
   args: ParsedArguments,
   dependencies: CliDependencies,
 ): Promise<number> {
-  const apiKey = args.values.get("api-key") ?? (await dependencies.readCredential());
-  await setTypeSafeApiKey(apiKey, dependencies.secretStore);
-  console.log("Stored TypeSafe API key in the operating system credential store.");
+  if (args.positionals.length > 1) {
+    throw new Error("login configures both TypeSafe and Firecrawl; omit the provider name");
+  }
+
+  const credentials = [
+    {
+      label: "TypeSafe",
+      provided:
+        args.values.get("typesafe-api-key") ?? args.values.get("api-key"),
+      get: getTypeSafeApiKey,
+      set: setTypeSafeApiKey,
+    },
+    {
+      label: "Firecrawl",
+      provided: args.values.get("firecrawl-api-key"),
+      get: getFirecrawlApiKey,
+      set: setFirecrawlApiKey,
+    },
+  ] as const;
+  const updates: Array<{ label: string; apiKey: string; set: typeof setTypeSafeApiKey }> = [];
+
+  for (const credential of credentials) {
+    const existing = await credential.get(dependencies.secretStore);
+    if (existing && !credential.provided) {
+      const replace = await dependencies.confirmCredentialReplacement(credential.label);
+      if (!replace) {
+        console.log(`Kept the existing ${credential.label} API key.`);
+        continue;
+      }
+    }
+    const apiKey =
+      credential.provided ?? (await dependencies.readCredential(credential.label));
+    updates.push({ label: credential.label, apiKey, set: credential.set });
+  }
+
+  for (const update of updates) {
+    await update.set(update.apiKey, dependencies.secretStore);
+    console.log(`Stored ${update.label} API key in the operating system credential store.`);
+  }
   return 0;
 }
 
@@ -390,16 +587,33 @@ async function runAuthCommand(
   args: ParsedArguments,
   dependencies: CliDependencies,
 ): Promise<number> {
-  const [, action] = args.positionals;
+  const [, action, rawProvider] = args.positionals;
   if (action === "status") {
-    const apiKey = await getTypeSafeApiKey(dependencies.secretStore);
-    console.log(`TypeSafe API key: ${apiKey ? "configured" : "not configured"}`);
-    return apiKey ? 0 : 1;
+    const providers: CredentialProvider[] = rawProvider
+      ? [parseCredentialProvider(rawProvider)]
+      : ["typesafe", "firecrawl"];
+    const configured = await Promise.all(
+      providers.map(async (provider) => {
+        const apiKey =
+          provider === "typesafe"
+            ? await getTypeSafeApiKey(dependencies.secretStore)
+            : await getFirecrawlApiKey(dependencies.secretStore);
+        const label = provider === "typesafe" ? "TypeSafe" : "Firecrawl";
+        console.log(`${label} API key: ${apiKey ? "configured" : "not configured"}`);
+        return Boolean(apiKey);
+      }),
+    );
+    return configured.every(Boolean) ? 0 : 1;
   }
   if (action === "delete") {
-    const deleted = await deleteTypeSafeApiKey(dependencies.secretStore);
+    const provider = parseCredentialProvider(rawProvider);
+    const label = provider === "typesafe" ? "TypeSafe" : "Firecrawl";
+    const deleted =
+      provider === "typesafe"
+        ? await deleteTypeSafeApiKey(dependencies.secretStore)
+        : await deleteFirecrawlApiKey(dependencies.secretStore);
     console.log(
-      deleted ? "Deleted the stored TypeSafe API key." : "No TypeSafe API key was stored.",
+      deleted ? `Deleted the stored ${label} API key.` : `No ${label} API key was stored.`,
     );
     return 0;
   }
@@ -419,6 +633,12 @@ function parseSearchLimit(args: ParsedArguments): number {
 async function requireTypeSafeApiKey(dependencies: CliDependencies): Promise<string> {
   const apiKey = await getTypeSafeApiKey(dependencies.secretStore);
   if (!apiKey) throw new Error("No TypeSafe API key stored; run `zen-bookmarks login`");
+  return apiKey;
+}
+
+async function requireFirecrawlApiKey(dependencies: CliDependencies): Promise<string> {
+  const apiKey = await getFirecrawlApiKey(dependencies.secretStore);
+  if (!apiKey) throw new Error("No Firecrawl API key stored; run `zen-bookmarks login`");
   return apiKey;
 }
 
@@ -446,6 +666,7 @@ function printSearchResults(results: BookmarkSearchResult[]): void {
     console.log(`${result.relevance.toFixed(3)}  ${result.title} (${result.id})`);
     console.log(`       ${location}`);
     console.log(`       ${result.url}`);
+    if (result.summary) console.log(`       Summary: ${result.summary}`);
   }
 }
 
@@ -520,6 +741,7 @@ export async function runCli(
   dependencies: CliDependencies = DEFAULT_CLI_DEPENDENCIES,
 ): Promise<number> {
   const args = parseArguments(argv);
+  const debugLogger = args.switches.has("debug") ? stderrDebugLogger : undefined;
   if (args.switches.has("help") || args.positionals.length === 0) {
     console.log(HELP);
     return 0;
@@ -539,9 +761,11 @@ export async function runCli(
       const result = await indexBookmarkLinks(
         sidebarBookmarkCandidates(tree),
         cache,
-        dependencies.createLinkClassifier(apiKey),
-        dependencies.loadLinkContent,
+        debugLinkClassifier(dependencies.createLinkClassifier(apiKey), debugLogger),
+        debugLinkContentLoader(dependencies.loadLinkContent, debugLogger),
         args.switches.has("refresh"),
+        4,
+        debugLogger,
       );
       if (args.switches.has("json")) console.log(JSON.stringify({ cachePath, ...result }));
       else {
@@ -556,7 +780,8 @@ export async function runCli(
   if (command === "search") {
     const query = args.positionals.slice(1).join(" ").trim();
     if (!query) throw new Error("search requires a query");
-    const apiKey = await requireTypeSafeApiKey(dependencies);
+    const typeSafeApiKey = await requireTypeSafeApiKey(dependencies);
+    const firecrawlApiKey = await requireFirecrawlApiKey(dependencies);
     const tree = buildSidebarTree(loadSession(path).session);
     const cache = openSearchCache(searchCachePath(args));
     try {
@@ -565,9 +790,20 @@ export async function runCli(
         query,
         {
           cache,
-          classifier: dependencies.createLinkClassifier(apiKey),
-          judge: dependencies.createRelevanceJudge(apiKey),
-          loader: dependencies.loadLinkContent,
+          classifier: debugLinkClassifier(
+            dependencies.createLinkClassifier(typeSafeApiKey),
+            debugLogger,
+          ),
+          judge: debugRelevanceJudge(
+            dependencies.createRelevanceJudge(typeSafeApiKey),
+            debugLogger,
+          ),
+          loader: debugLinkContentLoader(dependencies.loadLinkContent, debugLogger),
+          summarizer: debugPageSummarizer(
+            dependencies.createPageSummarizer(firecrawlApiKey),
+            debugLogger,
+          ),
+          debug: debugLogger,
         },
         {
           limit: parseSearchLimit(args),

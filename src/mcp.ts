@@ -73,7 +73,7 @@ const serverInstructions = [
   "Use search first when the user asks for relevant, useful, or topic-matching sidebar bookmarks.",
   "For exploratory project discovery, choose at most four diverse natural-language intents before starting, then issue one search call per intent sequentially with minRelevance 0.15 and limit 5 to 8.",
   "Never call search more than four times for one request. Stop earlier once you have 3 to 8 strong distinct matches or when two consecutive searches add no useful URLs; deduplicate by URL and do not retry below minRelevance 0.15 unless the user explicitly requests exhaustive low-confidence results.",
-  "Search results already include workspaceName and folderPath, so do not call status or list merely to locate a result.",
+  "Search results already include workspaceName, folderPath, and cached Firecrawl summaries for returned public pages, so do not call status or list merely to locate a result.",
   "Do not call index before search because search lazily populates its cache.",
   "Use list only for exhaustive sidebar browsing, exact stable-ID resolution, mutation preparation, or fallback after search fails.",
   "The MCP tools cover pinned Zen sidebar bookmarks; Firefox-style saved bookmarks from places.sqlite are available only through the interactive browser.",
@@ -128,6 +128,7 @@ const searchOutputSchema = z.object({
       folderPath: z.array(z.string()),
       retrievalScore: z.number(),
       relevance: z.number().min(0).max(1),
+      summary: z.string().nullable(),
     }),
   ),
 });
@@ -243,9 +244,9 @@ export function createZenBookmarksMcpServer(
   server.registerTool(
     "auth_status",
     {
-      title: "Check TypeSafe Credentials",
+      title: "Check Search Credentials",
       description:
-        "Diagnose whether relevance search credentials are configured. Call only when the user asks or search reports a credential error.",
+        "Diagnose whether TypeSafe and Firecrawl search credentials are configured. Call only when the user asks or search reports a credential error.",
       inputSchema: z.object({}),
       annotations: readOnlyAnnotations,
     },
@@ -333,7 +334,7 @@ export function createZenBookmarksMcpServer(
     {
       title: "Find Relevant Sidebar Bookmarks",
       description:
-        "Preferred first tool for finding useful or topic-matching pinned Zen sidebar bookmarks. Uses local BM25 retrieval plus TypeSafe reranking and lazily indexes missing public content. For project discovery choose at most four diverse focused intents, issue their calls sequentially, and stop earlier after finding 3 to 8 strong distinct URLs or after two calls add nothing useful. Use minRelevance 0.15; do not retry below it unless the user explicitly requests exhaustive low-confidence results. Results already include workspaceName and folderPath, so do not call status or list to locate them. Does not search Firefox-style saved bookmarks from places.sqlite.",
+        "Preferred first tool for finding useful or topic-matching pinned Zen sidebar bookmarks. Uses local BM25 retrieval plus TypeSafe reranking, lazily indexes missing public content, and adds cached Firecrawl summaries to every returned public result above the relevance threshold. Requires stored TypeSafe and Firecrawl API keys. For project discovery choose at most four diverse focused intents, issue their calls sequentially, and stop earlier after finding 3 to 8 strong distinct URLs or after two calls add nothing useful. Use minRelevance 0.15; do not retry below it unless the user explicitly requests exhaustive low-confidence results. Results already include workspaceName and folderPath, so do not call status or list to locate them. Does not search Firefox-style saved bookmarks from places.sqlite.",
       inputSchema: z.object({
         ...sessionFields,
         query: z

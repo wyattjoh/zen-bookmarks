@@ -17,6 +17,23 @@ export type CachedLinkRecord = {
   classificationJson: string;
   contentHash: string;
   error: string | null;
+  summary: string | null;
+  summaryAt: number | null;
+};
+
+/**
+ * Fetched link fields written independently from Firecrawl summaries.
+ */
+export type CachedLinkContentRecord = Omit<CachedLinkRecord, "summary" | "summaryAt">;
+
+/**
+ * Reusable Firecrawl summary tied to the locally indexed page content.
+ */
+export type CachedSummaryRecord = {
+  url: string;
+  contentHash: string;
+  summary: string;
+  createdAt: number;
 };
 
 /**
@@ -37,7 +54,8 @@ export type CachedRelevanceRecord = {
  */
 export type SearchCache = {
   getLink(url: string): CachedLinkRecord | null;
-  putLink(record: CachedLinkRecord): void;
+  putLink(record: CachedLinkContentRecord): void;
+  putSummary(record: CachedSummaryRecord): void;
   getRelevance(
     queryHash: string,
     bookmarkHash: string,
@@ -108,22 +126,31 @@ export function openSearchCache(path = defaultSearchCachePath()): SearchCache {
       created_at INTEGER NOT NULL,
       PRIMARY KEY (query_hash, bookmark_hash, model, question_version)
     );
+    CREATE TABLE IF NOT EXISTS summaries (
+      url TEXT PRIMARY KEY,
+      content_hash TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
 
   const getLinkStatement = database.query(`
     SELECT
-      url,
-      fetched_at AS fetchedAt,
-      fetch_status AS fetchStatus,
-      final_url AS finalUrl,
-      page_title AS pageTitle,
-      description,
-      text,
-      classification_json AS classificationJson,
-      content_hash AS contentHash,
-      error
+      links.url,
+      links.fetched_at AS fetchedAt,
+      links.fetch_status AS fetchStatus,
+      links.final_url AS finalUrl,
+      links.page_title AS pageTitle,
+      links.description,
+      links.text,
+      links.classification_json AS classificationJson,
+      links.content_hash AS contentHash,
+      links.error,
+      CASE WHEN summaries.content_hash = links.content_hash THEN summaries.summary END AS summary,
+      CASE WHEN summaries.content_hash = links.content_hash THEN summaries.created_at END AS summaryAt
     FROM links
-    WHERE url = ?
+    LEFT JOIN summaries ON summaries.url = links.url
+    WHERE links.url = ?
   `);
   const putLinkStatement = database.query(`
     INSERT INTO links (
@@ -140,6 +167,14 @@ export function openSearchCache(path = defaultSearchCachePath()): SearchCache {
       classification_json = excluded.classification_json,
       content_hash = excluded.content_hash,
       error = excluded.error
+  `);
+  const putSummaryStatement = database.query(`
+    INSERT INTO summaries (url, content_hash, summary, created_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(url) DO UPDATE SET
+      content_hash = excluded.content_hash,
+      summary = excluded.summary,
+      created_at = excluded.created_at
   `);
   const getRelevanceStatement = database.query(`
     SELECT score
@@ -172,6 +207,14 @@ export function openSearchCache(path = defaultSearchCachePath()): SearchCache {
         record.error,
       );
     },
+    putSummary(record) {
+      putSummaryStatement.run(
+        record.url,
+        record.contentHash,
+        record.summary,
+        record.createdAt,
+      );
+    },
     getRelevance(queryHash, bookmarkHash, model, questionVersion) {
       const row = getRelevanceStatement.get(
         queryHash,
@@ -193,7 +236,7 @@ export function openSearchCache(path = defaultSearchCachePath()): SearchCache {
       );
     },
     clearLinks() {
-      database.exec("DELETE FROM links; DELETE FROM relevance;");
+      database.exec("DELETE FROM summaries; DELETE FROM links; DELETE FROM relevance;");
     },
     close() {
       database.close();

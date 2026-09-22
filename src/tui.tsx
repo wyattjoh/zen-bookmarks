@@ -85,6 +85,7 @@ function bookmarkDetailLines(bookmark: TuiBookmark): Array<[string, string]> {
     ],
     ["Page title", bookmark.cached.pageTitle ?? "—"],
     ["Description", bookmark.cached.description ?? "—"],
+    ["Summary", bookmark.cached.summary ?? "—"],
     ["Resource", classification.resourceKind ?? "—"],
     ["Purpose", classification.purpose ?? "—"],
   );

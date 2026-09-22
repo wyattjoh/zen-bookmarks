@@ -66,18 +66,16 @@ function hash(path: string): string {
 }
 
 function memorySecretStore(): SecretStore {
-  let value: string | null = null;
+  const values = new Map<string, string>();
   return {
-    async get() {
-      return value;
+    async get(options) {
+      return values.get(options.name) ?? null;
     },
     async set(options) {
-      value = options.value;
+      values.set(options.name, options.value);
     },
-    async delete() {
-      const deleted = value !== null;
-      value = null;
-      return deleted;
+    async delete(options) {
+      return values.delete(options.name);
     },
   };
 }
@@ -144,6 +142,10 @@ describe("unified CLI", () => {
     const path = fixturePath();
     const store = memorySecretStore();
     const judgedQueries: string[] = [];
+    const summarizedUrls: string[] = [];
+    const credentialReads: string[] = [];
+    const replacementPrompts: string[] = [];
+    const replacementAnswers: boolean[] = [];
     const classification: LinkClassification = {
       version: 1,
       model: "test-model",
@@ -185,6 +187,15 @@ describe("unified CLI", () => {
           },
         };
       },
+      createPageSummarizer(apiKey) {
+        expect(apiKey).toBe("firecrawl-key");
+        return {
+          async summarize(url) {
+            summarizedUrls.push(url);
+            return "A useful example reference.";
+          },
+        };
+      },
       async loadLinkContent() {
         return {
           fetchStatus: "ok",
@@ -195,41 +206,92 @@ describe("unified CLI", () => {
           error: null,
         };
       },
-      async readCredential() {
-        return "test-key";
+      async readCredential(label) {
+        credentialReads.push(label);
+        return label === "TypeSafe" ? "test-key" : "firecrawl-key";
+      },
+      async confirmCredentialReplacement(label) {
+        replacementPrompts.push(label);
+        return replacementAnswers.shift() ?? false;
       },
     };
     const output: string[] = [];
+    const debugOutput: string[] = [];
+    let firstSearchDebugOutput: string[] = [];
+    let cachedSearchDebugOutput: string[] = [];
     const originalLog = console.log;
+    const originalError = console.error;
     console.log = (...values: unknown[]) => output.push(values.map(String).join(" "));
+    console.error = (...values: unknown[]) =>
+      debugOutput.push(values.map(String).join(" "));
 
     try {
       expect(await runCli(["auth", "status"], dependencies)).toBe(1);
       expect(await runCli(["login"], dependencies)).toBe(0);
-      expect(
-        await runCli(
-          [
-            "search",
-            "useful",
-            "example",
-            "--sessions",
-            path,
-            "--cache",
-            `${path}.sqlite`,
-            "--limit",
-            "1",
-            "--json",
-          ],
-          dependencies,
-        ),
-      ).toBe(0);
+      expect(await runCli(["auth", "delete", "firecrawl"], dependencies)).toBe(0);
+      await expect(
+        runCli(["search", "useful example", "--sessions", path], dependencies),
+      ).rejects.toThrow("No Firecrawl API key stored");
+
+      replacementAnswers.push(false);
+      expect(await runCli(["login"], dependencies)).toBe(0);
+      expect(await runCli(["auth", "status"], dependencies)).toBe(0);
+      replacementAnswers.push(false, false);
+      expect(await runCli(["login"], dependencies)).toBe(0);
+      const searchArguments = [
+        "search",
+        "useful",
+        "example",
+        "--sessions",
+        path,
+        "--cache",
+        `${path}.sqlite`,
+        "--limit",
+        "1",
+        "--debug",
+        "--json",
+      ];
+      expect(await runCli(searchArguments, dependencies)).toBe(0);
+      firstSearchDebugOutput = [...debugOutput];
+      debugOutput.length = 0;
+      expect(await runCli(searchArguments, dependencies)).toBe(0);
+      cachedSearchDebugOutput = [...debugOutput];
     } finally {
       console.log = originalLog;
+      console.error = originalError;
     }
 
+    expect(firstSearchDebugOutput.join("\n")).toContain('operation="page-fetch"');
+    expect(firstSearchDebugOutput.join("\n")).toContain(
+      'operation="typesafe-classification"',
+    );
+    expect(firstSearchDebugOutput.join("\n")).toContain(
+      'operation="typesafe-relevance"',
+    );
+    expect(firstSearchDebugOutput.join("\n")).toContain('operation="firecrawl-summary"');
+    expect(firstSearchDebugOutput.some((line) => line.includes("duration_ms="))).toBe(
+      true,
+    );
+    expect(cachedSearchDebugOutput.join("\n")).toContain(
+      'network.cache_summary operation="link-index"',
+    );
+    expect(cachedSearchDebugOutput.join("\n")).toContain(
+      'network.cache_hit operation="typesafe-relevance"',
+    );
+    expect(cachedSearchDebugOutput.join("\n")).toContain(
+      'network.cache_hit operation="firecrawl-summary"',
+    );
+    expect(credentialReads).toEqual(["TypeSafe", "Firecrawl", "Firecrawl"]);
+    expect(replacementPrompts).toEqual(["TypeSafe", "TypeSafe", "Firecrawl"]);
     expect(judgedQueries).toEqual(["useful example"]);
+    expect(summarizedUrls).toEqual(["https://example.com/"]);
     expect(JSON.parse(output.at(-1) ?? "[]")).toEqual([
-      expect.objectContaining({ id: "bookmark-1", title: "Example", relevance: 0.87 }),
+      expect.objectContaining({
+        id: "bookmark-1",
+        title: "Example",
+        relevance: 0.87,
+        summary: "A useful example reference.",
+      }),
     ]);
   });
 });

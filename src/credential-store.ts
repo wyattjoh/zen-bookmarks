@@ -9,9 +9,16 @@ export type SecretStore = {
   delete(options: { service: string; name: string }): Promise<boolean>;
 };
 
+const CREDENTIAL_SERVICE = "com.github.wyattjoh.zen-bookmarks";
+
 const TYPESAFE_CREDENTIAL = {
-  service: "com.github.wyattjoh.zen-bookmarks",
+  service: CREDENTIAL_SERVICE,
   name: "typesafe-api-key",
+} as const;
+
+const FIRECRAWL_CREDENTIAL = {
+  service: CREDENTIAL_SERVICE,
+  name: "firecrawl-api-key",
 } as const;
 
 /**
@@ -47,4 +54,39 @@ export async function setTypeSafeApiKey(
  */
 export function deleteTypeSafeApiKey(store: SecretStore = secrets): Promise<boolean> {
   return store.delete(TYPESAFE_CREDENTIAL);
+}
+
+/**
+ * Retrieve the Firecrawl API key from the operating system credential store.
+ *
+ * @param store - Secret store implementation
+ * @returns Stored API key, or `null` when no key is configured
+ */
+export function getFirecrawlApiKey(store: SecretStore = secrets): Promise<string | null> {
+  return store.get(FIRECRAWL_CREDENTIAL);
+}
+
+/**
+ * Store the Firecrawl API key in the operating system credential store.
+ *
+ * @param apiKey - Firecrawl API key to store
+ * @param store - Secret store implementation
+ */
+export async function setFirecrawlApiKey(
+  apiKey: string,
+  store: SecretStore = secrets,
+): Promise<void> {
+  const value = apiKey.trim();
+  if (!value) throw new Error("Firecrawl API key cannot be empty");
+  await store.set({ ...FIRECRAWL_CREDENTIAL, value });
+}
+
+/**
+ * Delete the Firecrawl API key from the operating system credential store.
+ *
+ * @param store - Secret store implementation
+ * @returns Whether a stored key was deleted
+ */
+export function deleteFirecrawlApiKey(store: SecretStore = secrets): Promise<boolean> {
+  return store.delete(FIRECRAWL_CREDENTIAL);
 }

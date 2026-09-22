@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import type { BookmarkCandidate } from "./bookmark-candidates.ts";
+import type { NetworkDebugLogger } from "./network-debug.ts";
 import type { CachedLinkRecord, SearchCache } from "./search-cache.ts";
 
 const CLASSIFICATION_VERSION = 1;
@@ -483,6 +484,7 @@ async function mapConcurrent<T>(
  * @param loader - Safe public content loader
  * @param refresh - Whether to replace existing cache entries
  * @param concurrency - Maximum simultaneous fetch/classification operations
+ * @param debug - Optional network/cache debug event receiver
  * @returns Indexing counts
  */
 export async function indexBookmarkLinks(
@@ -492,6 +494,7 @@ export async function indexBookmarkLinks(
   loader: LinkContentLoader = fetchPublicLinkContent,
   refresh = false,
   concurrency = 4,
+  debug: NetworkDebugLogger | undefined = undefined,
 ): Promise<LinkIndexResult> {
   const uniqueCandidates = [
     ...new Map(
@@ -535,6 +538,12 @@ export async function indexBookmarkLinks(
       error: content.error,
     });
     indexed += 1;
+  });
+  debug?.("network.cache_summary", {
+    operation: "link-index",
+    cache_hits: cached,
+    network_candidates: indexed,
+    total: uniqueCandidates.length,
   });
   return { total: uniqueCandidates.length, cached, indexed };
 }

@@ -178,6 +178,7 @@ describe("MCP server", () => {
     expect(search?.description).toContain("Preferred first tool");
     expect(search?.description).toContain("at most four diverse focused intents");
     expect(search?.description).toContain("workspaceName and folderPath");
+    expect(JSON.stringify(search?.outputSchema)).toContain('"summary"');
     expect(search?.inputSchema).toMatchObject({
       properties: {
         limit: {

@@ -1,6 +1,7 @@
 import { noul, TypeSafeClient } from "@typesafe-ai/sdk";
 import { createHash } from "node:crypto";
 import { bm25Search } from "./bm25.ts";
+import type { PageSummarizer } from "./firecrawl-summary.ts";
 import {
   sidebarBookmarkCandidates,
   type BookmarkCandidate,
@@ -12,10 +13,12 @@ import {
   type LinkClassifier,
   type LinkContentLoader,
 } from "./link-index.ts";
+import type { NetworkDebugLogger } from "./network-debug.ts";
 import type { CachedLinkRecord, SearchCache } from "./search-cache.ts";
 import type { SidebarBookmark, SidebarTree } from "./sidebar.ts";
 
 const RELEVANCE_QUESTION_VERSION = 2;
+const SUMMARY_CONCURRENCY = 3;
 const RELEVANCE_QUESTION = noul(
   {
     task: "Judge whether the pinned Zen sidebar bookmark in `bookmark` directly satisfies the user's search intent in `query`.",
@@ -62,6 +65,8 @@ export type BookmarkSearchDependencies = {
   classifier: LinkClassifier;
   judge: RelevanceJudge;
   loader: LinkContentLoader;
+  summarizer: PageSummarizer;
+  debug: NetworkDebugLogger | undefined;
 };
 
 /**
@@ -83,6 +88,7 @@ export type BookmarkSearchResult = SidebarBookmark & {
   folderPath: string[];
   retrievalScore: number;
   relevance: number;
+  summary: string | null;
 };
 
 type IndexedCandidate = {
@@ -162,6 +168,55 @@ async function mapConcurrent<T, U>(
   return results;
 }
 
+async function enrichSummaries(
+  results: BookmarkSearchResult[],
+  dependencies: BookmarkSearchDependencies,
+): Promise<BookmarkSearchResult[]> {
+  const selected = new Map<string, CachedLinkRecord>();
+  for (const result of results) {
+    const url = canonicalLinkUrl(result.url);
+    const link = dependencies.cache.getLink(url);
+    if (!link) throw new Error(`Search index is missing ${result.url}`);
+    if (link.fetchStatus === "ok") {
+      selected.set(url, link);
+      continue;
+    }
+    dependencies.debug?.("network.skip", {
+      operation: "firecrawl-summary",
+      reason: `fetch-${link.fetchStatus}`,
+      url,
+    });
+  }
+
+  const summaries = new Map<string, string>();
+  await mapConcurrent([...selected], SUMMARY_CONCURRENCY, async ([url, link]) => {
+    if (link.summary) {
+      dependencies.debug?.("network.cache_hit", {
+        operation: "firecrawl-summary",
+        url,
+      });
+      summaries.set(url, link.summary);
+      return;
+    }
+    const summary = await dependencies.summarizer.summarize(link.finalUrl ?? url);
+    dependencies.cache.putSummary({
+      url,
+      contentHash: link.contentHash,
+      summary,
+      createdAt: Date.now(),
+    });
+    summaries.set(url, summary);
+  });
+
+  return results.map((result) => {
+    const url = canonicalLinkUrl(result.url);
+    return {
+      ...result,
+      summary: summaries.get(url) ?? dependencies.cache.getLink(url)?.summary ?? null,
+    };
+  });
+}
+
 /**
  * Create a TypeSafe relevance judge that evaluates one candidate per request.
  *
@@ -232,6 +287,7 @@ export async function searchSidebarBookmarks(
     dependencies.loader,
     false,
     options.indexConcurrency,
+    dependencies.debug,
   );
   const indexed: IndexedCandidate[] = candidates.map((candidate) => {
     const link = dependencies.cache.getLink(canonicalLinkUrl(candidate.bookmark.url));
@@ -257,6 +313,13 @@ export async function searchSidebarBookmarks(
         dependencies.judge.model,
         RELEVANCE_QUESTION_VERSION,
       );
+      if (cachedScore !== null) {
+        dependencies.debug?.("network.cache_hit", {
+          operation: "typesafe-relevance",
+          model: dependencies.judge.model,
+          url: candidate.candidate.bookmark.url,
+        });
+      }
       const relevance =
         cachedScore ??
         (await dependencies.judge.score(relevanceState(normalizedQuery, candidate)));
@@ -277,11 +340,12 @@ export async function searchSidebarBookmarks(
         folderPath: candidate.candidate.folderPath,
         retrievalScore: candidate.retrievalScore,
         relevance,
+        summary: null,
       };
     },
   );
 
-  return scored
+  const ranked = scored
     .filter((result) => result.relevance >= options.minimumRelevance)
     .sort(
       (left, right) =>
@@ -290,4 +354,5 @@ export async function searchSidebarBookmarks(
         left.title.localeCompare(right.title),
     )
     .slice(0, options.limit);
+  return enrichSummaries(ranked, dependencies);
 }

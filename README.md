@@ -11,8 +11,9 @@ Run `zen-bookmarks` without arguments in a terminal to open the interactive book
 - On-demand re-scraping and reclassification of the selected bookmark
 - Read-only status, list, verify, export, and relevance-search commands work while Zen is open
 - Cached BM25 retrieval and TypeSafe reranking across sidebar bookmarks
-- Persistent page metadata, link classifications, and relevance scores in SQLite
-- OS-native TypeSafe credential storage through Bun Secrets
+- Firecrawl summaries for every returned public page above the relevance threshold
+- Persistent page metadata, link classifications, summaries, and relevance scores in SQLite
+- OS-native TypeSafe and Firecrawl credential storage through Bun Secrets
 - Full CRUD for sidebar bookmarks, folders, and workspaces
 - JSON output with stable Zen IDs for scripting and unambiguous targeting
 - Typed MCP tools for read, search, export, import, and sidebar CRUD operations
@@ -27,6 +28,7 @@ Run `zen-bookmarks` without arguments in a terminal to open the interactive book
 - [Bun](https://bun.sh) 1.3 or newer
 - Zen Browser on macOS
 - A [TypeSafe](https://typesafe.ai) API key for relevance search
+- A [Firecrawl](https://firecrawl.dev) API key for top-result summaries
 
 Profile discovery currently scans `~/Library/Application Support/zen/Profiles`. Use `--sessions <path>` for an explicit session file or `--profile <substring>` to select among multiple profiles.
 
@@ -51,7 +53,7 @@ You can also run the source directly:
 bun src/zen-bookmarks.ts --help
 ```
 
-Run `bun install` to install the TypeSafe SDK and development dependencies.
+Run `bun install` to install the TypeSafe and Firecrawl SDKs plus development dependencies.
 
 ## MCP server
 
@@ -80,7 +82,7 @@ MCP tools operate on pinned Zen sidebar bookmarks. Firefox-style saved bookmarks
 
 Mutation tools default to `apply: false`, which runs the existing `--dry-run` path without closing Zen or writing files. Set `apply: true` only after reviewing that result; the server then uses the CLI's non-interactive `--yes` lifecycle, including validation, backup, atomic replacement, and reopening Zen when appropriate. The optional `reopen` boolean maps to `--reopen` or `--no-reopen`.
 
-Credential entry and deletion are intentionally not exposed over MCP because tool arguments and calls may be logged by clients. Configure TypeSafe access locally with `zen-bookmarks login`; `index` and `search` then use the stored credential. The interactive TUI also remains a terminal-only interface.
+Credential entry and deletion are intentionally not exposed over MCP because tool arguments and calls may be logged by clients. Run `zen-bookmarks login` once to configure TypeSafe and Firecrawl; existing keys are preserved unless you confirm that they should be replaced. `search` requires both stored credentials, while `index` requires only TypeSafe. The interactive TUI also remains a terminal-only interface.
 
 ## Interactive browser
 
@@ -90,9 +92,9 @@ Launch the TUI from an interactive terminal:
 zen-bookmarks
 ```
 
-The left pane presents saved bookmarks and sidebar bookmarks as collapsible folder trees grouped by source and workspace, including empty folders. All folders start collapsed, and folder depth is the only source of row indentation. Each bookmark uses a title line followed immediately by its muted URL. Press `Tab` to cycle through Zen workspaces such as Personal and Work (`Shift-Tab` cycles backward); saved bookmarks remain visible in every workspace view. A persistent search field fuzzy-filters titles, URLs, folders, locations, and cached metadata; press `/` to focus it. The focused border identifies whether keyboard input targets workspaces, search, bookmarks, or details. Arrow keys move between regions, `j`/`k` navigate bookmarks or scroll details, and Page Up/Page Down moves by a page. Right opens details for a bookmark or expands a collapsed folder; Left returns from details or collapses a folder; Enter toggles folders. Mouse clicks transfer focus, and dragging still selects text for copying without leaving a one-character highlight after ordinary clicks. The detail pane shows cached page metadata and a readable topic-confidence table while hiding internal hashes and raw classification JSON. Press lowercase `r` to fetch the selected page again and rerun its TypeSafe classification, uppercase `R` to reload both bookmark databases from Zen, or `q` to quit.
+The left pane presents saved bookmarks and sidebar bookmarks as collapsible folder trees grouped by source and workspace, including empty folders. All folders start collapsed, and folder depth is the only source of row indentation. Each bookmark uses a title line followed immediately by its muted URL. Press `Tab` to cycle through Zen workspaces such as Personal and Work (`Shift-Tab` cycles backward); saved bookmarks remain visible in every workspace view. A persistent search field fuzzy-filters titles, URLs, folders, locations, and cached metadata; press `/` to focus it. The focused border identifies whether keyboard input targets workspaces, search, bookmarks, or details. Arrow keys move between regions, `j`/`k` navigate bookmarks or scroll details, and Page Up/Page Down moves by a page. Right opens details for a bookmark or expands a collapsed folder; Left returns from details or collapses a folder; Enter toggles folders. Mouse clicks transfer focus, and dragging still selects text for copying without leaving a one-character highlight after ordinary clicks. The detail pane shows cached page metadata, Firecrawl summary when available, and a readable topic-confidence table while hiding internal hashes and raw classification JSON. Press lowercase `r` to fetch the selected page again and rerun its TypeSafe classification, uppercase `R` to reload both bookmark databases from Zen, or `q` to quit.
 
-Re-scraping requires a stored TypeSafe API key (`zen-bookmarks login`). Saved bookmarks are browse-only; mutation commands continue to target sidebar bookmarks. If Zen holds an exclusive lock on `places.sqlite`, the TUI reads a temporary snapshot of both the main database and its WAL so recent saved-bookmark changes remain visible without interfering with the browser.
+Re-scraping requires the TypeSafe API key configured by `zen-bookmarks login`. Saved bookmarks are browse-only; mutation commands continue to target sidebar bookmarks. If Zen holds an exclusive lock on `places.sqlite`, the TUI reads a temporary snapshot of both the main database and its WAL so recent saved-bookmark changes remain visible without interfering with the browser.
 
 When standard input or output is not a TTY, invoking the command without arguments prints CLI help instead of opening the TUI.
 
@@ -137,8 +139,8 @@ Human-readable lists include workspace, folder, and bookmark IDs. Use those IDs 
 
 ## AI relevance search
 
-Store a TypeSafe API key in the operating system credential store, then search
-sidebar bookmarks with natural language:
+Store TypeSafe and Firecrawl API keys in the operating system credential store, then
+search sidebar bookmarks with natural language:
 
 ```bash
 zen-bookmarks login
@@ -151,15 +153,19 @@ zen-bookmarks search "documentation for browser extension authentication"
 zen-bookmarks search "recipes I saved for dinner" --limit 5
 zen-bookmarks search "loosely related developer tools" --min-relevance 0.25
 zen-bookmarks search "TypeScript references" --json
+zen-bookmarks search "AI agent tools" --debug --json
 
-zen-bookmarks auth delete
+zen-bookmarks auth delete typesafe
+zen-bookmarks auth delete firecrawl
 ```
 
-`login` prompts without echoing the key. It also accepts `--api-key <key>` for
-automation, but the argument may be retained in shell history or exposed to process
-inspection. Credentials are stored through Bun Secrets in macOS Keychain, Linux
-Secret Service, or Windows Credential Manager; they are never read from environment
-variables.
+`login` prompts without echoing missing keys. When a key is already configured, it
+asks whether to replace it and defaults to keeping the existing value. For automation,
+pass `--typesafe-api-key <key>` and `--firecrawl-api-key <key>`; explicit flags replace
+stored values without prompting, but may be retained in shell history or exposed to
+process inspection. Credentials are stored through Bun Secrets in macOS Keychain,
+Linux Secret Service, or Windows Credential Manager; they are never read from
+environment variables.
 
 The indexer and TUI cache bounded public-page metadata and text plus reusable TypeSafe
 classifications in the platform user-cache directory. Classification questions for one
@@ -169,10 +175,18 @@ Existing entries remain cached until `zen-bookmarks index --refresh` is run.
 
 Search lazily indexes missing links, uses local BM25 retrieval to select up to 30
 candidates, and asks TypeSafe one independent Noul relevance question per candidate.
-The CLI caches each judgment by normalized query, bookmark-content hash, model, and
-question version, so repeating an unchanged search makes no TypeSafe requests. Results
-below 0.5 relevance are hidden by default; `--min-relevance` changes that cutoff. Use
-`--cache <path>` to override the default SQLite location.
+After applying the relevance cutoff, sorting, and result limit, it calls Firecrawl's SDK
+with the `summary` format for every returned public page. Calls use bounded concurrency.
+Summaries are general rather than query-specific and are cached against the locally
+indexed page-content hash, so unchanged pages are not sent to Firecrawl again. The CLI and MCP search responses include
+the summaries, and the TUI displays cached summaries in bookmark details.
+
+The CLI caches each relevance judgment by normalized query, bookmark-content hash, model,
+and question version, so repeating an unchanged search makes no TypeSafe requests.
+Results below 0.5 relevance are hidden by default; `--min-relevance` changes that cutoff.
+Use `--cache <path>` to override the default SQLite location. Add `--debug` to `index`
+or `search` to write page-fetch, TypeSafe, and Firecrawl operation timings plus cache-hit
+and skip decisions to stderr; stdout remains valid human-readable or JSON output.
 
 ## Bookmark CRUD
 
